@@ -43,6 +43,7 @@ function restore(img) {
 
 const sendStroke = (type, data) => {
   if (_squelchSend) return;
+  if (type === "clear") console.log("Clear board.js");
   const msgString = b4a.from(JSON.stringify({ type, data }));
 
   const peers = [...swarm.connections];
@@ -210,7 +211,8 @@ redoBtn?.addEventListener("click", () => {
 });
 clearBtn?.addEventListener("click", () => {
   snapshot();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  clear();
+  sendStroke("clear");
 });
 saveBtn?.addEventListener("click", () => {
   const a = document.createElement("a");
@@ -218,6 +220,10 @@ saveBtn?.addEventListener("click", () => {
   a.download = "whiteboard.png";
   a.click();
 });
+
+export function clear() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
 
 // basic resize handling
 function resizeCanvasToDisplaySize() {

@@ -210,3 +210,63 @@ canvas {
 .notification.info {
   border-left: 6px solid #17a2b8;
 }
+
+#loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+#landing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  width: 100%;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #242436;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px #0c0c12,
+    0 20px 40px rgba(0, 0, 0, 0.35);
+}
+
+.grid {
+  display: flex;
+  flex-direction: row;
+  gap: 32px;
+  padding: 12px;
+  border: 1px solid #242436;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 0 0 1px #0c0c12,
+    0 20px 40px rgba(0, 0, 0, 0.35);
+}
+
+.pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+input {
+  padding: 7px;
+  border-radius: 6px;
+  background: #1a1a28;
+  border: 1px solid #2a2a3f;
+}
+
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

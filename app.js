@@ -5,7 +5,7 @@
 import Hyperswarm from "hyperswarm"; // Module for P2P networking and connecting peers
 import crypto from "hypercore-crypto"; // Cryptographic functions for generating the key in app
 import b4a from "b4a";
-import { onRemoteStroke } from "./board.js"; // Module for buffer-to-string and vice-versa conversions
+import { clear, onRemoteStroke } from "./board.js"; // Module for buffer-to-string and vice-versa conversions
 const { teardown, updates } = Pear; // Functions for cleanup and updates
 
 export const swarm = new Hyperswarm();
@@ -16,6 +16,7 @@ updates(() => Pear.reload());
 swarm.on("connection", (peer) => {
   peer.on("data", (msg) => {
     let normalMsg = JSON.parse(b4a.toString(msg));
+    if (normalMsg.type === "clear") clear();
     onRemoteStroke(normalMsg.type, normalMsg.data);
   });
   peer.on("error", (e) => console.log(`Connection error: ${e}`));
