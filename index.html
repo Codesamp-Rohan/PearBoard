@@ -1,0 +1,110 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>P2P Whiteboard</title>
+    <link rel="stylesheet" href="./style.css" />
+    <!-- Single entry file. board.js is imported from app.js to avoid double init -->
+    <script type="module" src="./app.js"></script>
+  </head>
+  <body>
+    <div id="bar"><pear-ctrl></pear-ctrl></div>
+
+    <!-- Notifications / toasts -->
+    <div id="notifications"></div>
+
+    <!-- Landing overlay for create/join -->
+    <div id="landing" class="landing" aria-modal="true" role="dialog">
+      <div class="card">
+        <h1>Start whiteboarding</h1>
+        <div class="grid">
+          <div class="pane">
+            <h2>Create a new canvas</h2>
+            <div class="row">
+              <button class="btn" id="createRoom">✨ Create</button>
+              <span class="sub">Generates a room code and opens it.</span>
+            </div>
+            <div class="sub">
+              Your drawings auto‑save per room on this device.
+            </div>
+          </div>
+          <div class="pane">
+            <h2>Join an existing canvas</h2>
+            <form id="joinForm" class="row" onsubmit="return false">
+              <input
+                type="text"
+                id="joinInput"
+                placeholder="Enter code or paste full link"
+              />
+              <button class="btn" type="button" id="joinBtn">Join</button>
+            </form>
+            <div class="sub">
+              Ask a teammate for the <span class="code">CODE</span> or URL.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="loading" class="hidden">Loading...</div>
+    <div class="whiteboard-wrapper hidden">
+      <div class="toolbar" role="toolbar" aria-label="Whiteboard toolbar">
+        <div class="section" id="tools">
+          <button class="btn active" data-tool="pen" title="Freehand (P)">
+            ✏️ Pen
+          </button>
+          <button class="btn" data-tool="eraser" title="Eraser (E)">
+            🧽 Eraser
+          </button>
+        </div>
+
+        <div class="section">
+          <label class="input" title="Stroke color">
+            <span>Color</span>
+            <input type="color" id="color" value="#111111" />
+          </label>
+          <label class="input" title="Brush size">
+            <span>Size</span>
+            <input type="range" id="size" min="1" max="60" value="6" />
+          </label>
+        </div>
+
+        <div class="section">
+          <button class="btn" id="undo" title="Undo (Ctrl/Cmd+Z)">
+            ↶ Undo
+          </button>
+          <button class="btn" id="redo" title="Redo (Ctrl/Cmd+Shift+Z)">
+            ↷ Redo
+          </button>
+          <button class="btn" id="clear" title="Clear">🗑️ Clear</button>
+        </div>
+
+        <div class="section">
+          <button class="btn" id="save" title="Save PNG">💾 Save PNG</button>
+        </div>
+
+        <div class="section">
+          <p>Key:</p>
+          <p id="canvas-room-key" class="code"></p>
+        </div>
+        <div class="section">
+          <p>Peers:</p>
+          <p id="canvas-room-size">0</p>
+        </div>
+      </div>
+
+      <div class="wrap">
+        <canvas
+          id="board"
+          width="1920"
+          height="1080"
+          aria-label="Drawing canvas"
+        ></canvas>
+        <div class="hint">
+          Draw with mouse or touch • Double‑click to finish stroke
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

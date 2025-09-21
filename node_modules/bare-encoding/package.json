@@ -1,0 +1,53 @@
+{
+  "name": "bare-encoding",
+  "version": "1.0.0",
+  "description": "WHATWG text encoding interfaces for JavaScript",
+  "exports": {
+    "./package": "./package.json",
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./global": {
+      "types": "./global.d.ts",
+      "default": "./global.js"
+    },
+    "./errors": {
+      "types": "./lib/errors.d.ts",
+      "default": "./lib/errors.js"
+    }
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "global.js",
+    "global.d.ts",
+    "lib"
+  ],
+  "scripts": {
+    "test": "prettier . --check && bare test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/holepunchto/bare-encoding.git"
+  },
+  "author": "Holepunch",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/holepunchto/bare-encoding/issues"
+  },
+  "homepage": "https://github.com/holepunchto/bare-encoding#readme",
+  "devDependencies": {
+    "brittle": "^3.1.1",
+    "prettier": "^3.3.3",
+    "prettier-config-standard": "^7.0.0"
+  },
+  "peerDependencies": {
+    "bare-buffer": "*"
+  },
+  "peerDependenciesMeta": {
+    "bare-buffer": {
+      "optional": true
+    }
+  }
+}
