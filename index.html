@@ -1,110 +1,65 @@
 <!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>P2P Whiteboard</title>
-    <link rel="stylesheet" href="./style.css" />
-    <!-- Single entry file. board.js is imported from app.js to avoid double init -->
-    <script type="module" src="./app.js"></script>
-  </head>
-  <body>
-    <div id="bar"><pear-ctrl></pear-ctrl></div>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Whiteboard — Vanilla JS</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+<p class="drag-msg">Use <b>shift</b> to drag</p>
+<div id="titlebar">
+  <pear-ctrl></pear-ctrl>
+</div>
+<div id="setup">
+  <div>
+    <button id="create-canvas">Create</button>
+  </div>
+  <div id="or">
+    - or -
+  </div>
+  <div id="join-form">
+    <button type="button" id="join-canvas">Join</button>
+    <input required id="join-canvas-topic" type="text" placeholder="Chat room Topic" />
+  </div>
+</div>
+<div id="loading" class="hidden">Loading ...</div>
+<header class="toolbar hidden" role="toolbar" aria-label="Whiteboard toolbar">
+  <div class="group" id="tools">
+    <button class="btn active" data-tool="pen" title="Pen (P)">✏️</button>
+    <button class="btn" data-tool="eraser" title="Eraser (E)">🧽</button>
+    <button class="btn" data-tool="line" title="Line (L)">／</button>
+    <button class="btn" data-tool="rect" title="Rectangle (R)">▭</button>
+    <button class="btn" data-tool="ellipse" title="Ellipse (O)">⬭</button>
+    <button class="btn" data-tool="diamond" title="Diamond (D)">⬥</button>
+    <button class="btn" data-tool="text" title="Text (T)">🅣</button>
+  </div>
 
-    <!-- Notifications / toasts -->
-    <div id="notifications"></div>
+  <div class="group">
+    <label class="label">Color <input id="color" type="color" value="#111111" /></label>
+    <label class="label">Size <input id="size" type="range" min="1" max="50" value="6" /></label>
+  </div>
 
-    <!-- Landing overlay for create/join -->
-    <div id="landing" class="landing" aria-modal="true" role="dialog">
-      <div class="card">
-        <h1>Start whiteboarding</h1>
-        <div class="grid">
-          <div class="pane">
-            <h2>Create a new canvas</h2>
-            <div class="row">
-              <button class="btn" id="createRoom">✨ Create</button>
-              <span class="sub">Generates a room code and opens it.</span>
-            </div>
-            <div class="sub">
-              Your drawings auto‑save per room on this device.
-            </div>
-          </div>
-          <div class="pane">
-            <h2>Join an existing canvas</h2>
-            <form id="joinForm" class="row" onsubmit="return false">
-              <input
-                type="text"
-                id="joinInput"
-                placeholder="Enter code or paste full link"
-              />
-              <button class="btn" type="button" id="joinBtn">Join</button>
-            </form>
-            <div class="sub">
-              Ask a teammate for the <span class="code">CODE</span> or URL.
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+  <div class="group">
+    <button id="undo" class="btn" title="Undo (Ctrl/Cmd+Z)">↶</button>
+    <button id="redo" class="btn" title="Redo (Ctrl/Cmd+Shift+Z)">↷</button>
+    <button id="clear" class="btn" title="Clear">🗑️</button>
+    <button id="save" class="btn" title="Save PNG">💾</button>
+  </div>
 
-    <div id="loading" class="hidden">Loading...</div>
-    <div class="whiteboard-wrapper hidden">
-      <div class="toolbar" role="toolbar" aria-label="Whiteboard toolbar">
-        <div class="section" id="tools">
-          <button class="btn active" data-tool="pen" title="Freehand (P)">
-            ✏️ Pen
-          </button>
-          <button class="btn" data-tool="eraser" title="Eraser (E)">
-            🧽 Eraser
-          </button>
-        </div>
+  <div class="group">
+    <p>Key : </p><p id="canvas-topic"></p>
+  </div>
+  <div class="group">
+    <p>Peers Count : </p><p id="peers-count">1</p>
+  </div>
+</header>
 
-        <div class="section">
-          <label class="input" title="Stroke color">
-            <span>Color</span>
-            <input type="color" id="color" value="#111111" />
-          </label>
-          <label class="input" title="Brush size">
-            <span>Size</span>
-            <input type="range" id="size" min="1" max="60" value="6" />
-          </label>
-        </div>
+<main class="board-wrap hidden">
+  <canvas id="board" aria-label="Drawing canvas"></canvas>
+  <p id="mouse-follower">You</p>
+</main>
 
-        <div class="section">
-          <button class="btn" id="undo" title="Undo (Ctrl/Cmd+Z)">
-            ↶ Undo
-          </button>
-          <button class="btn" id="redo" title="Redo (Ctrl/Cmd+Shift+Z)">
-            ↷ Redo
-          </button>
-          <button class="btn" id="clear" title="Clear">🗑️ Clear</button>
-        </div>
-
-        <div class="section">
-          <button class="btn" id="save" title="Save PNG">💾 Save PNG</button>
-        </div>
-
-        <div class="section">
-          <p>Key:</p>
-          <p id="canvas-room-key" class="code"></p>
-        </div>
-        <div class="section">
-          <p>Peers:</p>
-          <p id="canvas-room-size">0</p>
-        </div>
-      </div>
-
-      <div class="wrap">
-        <canvas
-          id="board"
-          width="1920"
-          height="1080"
-          aria-label="Drawing canvas"
-        ></canvas>
-        <div class="hint">
-          Draw with mouse or touch • Double‑click to finish stroke
-        </div>
-      </div>
-    </div>
-  </body>
+<script src="./app.js" type="module" defer></script>
+</body>
 </html>

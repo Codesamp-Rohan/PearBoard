@@ -27,7 +27,7 @@
     "prettier": "^3.6.2"
   },
   "dependencies": {
-    "b4a": "^1.7.1",
+    "b4a": "^1.7.2",
     "hypercore-crypto": "^3.6.1",
     "hyperswarm": "^4.14.0"
   }
