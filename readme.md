@@ -60,7 +60,10 @@ pear run -d .
 
 ## Join Room
 
-Join the [Keet Room](pear://keet/yfoik1wj341giyzf7tyr5efkyfdtrtfugamgw476muitdyfug6np4hcheycra1marpmuynsag6dpmy46gxawdu7pxd8kri1936euegcm1miqd6jm7gw3dwr99k69js1eihftwi8jrphozbxmgdzrgg4wop3t4ye) to discuss about the PearBoard.
+Join the 
+```bash
+pear://keet/yfoik1wj341giyzf7tyr5efkyfdtrtfugamgw476muitdyfug6np4hcheycra1marpmuynsag6dpmy46gxawdu7pxd8kri1936euegcm1miqd6jm7gw3dwr99k69js1eihftwi8jrphozbxmgdzrgg4wop3t4ye to discuss about the PearBoard.
+```
 
 ## 🤝 Contributing
 
