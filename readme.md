@@ -25,7 +25,7 @@ It allows multiple users to connect directly, draw together in real-time, and sh
 - **Pear** (Holepunch stack: Hypercore, Hyperswarm)
 - **JavaScript, HTML, CSS**
 - **Canvas API** for rendering drawings
-- **P2P messaging** for synchronization
+- **Live Collaboration**
 
 ---
 
