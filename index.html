@@ -12,6 +12,11 @@
   <pear-ctrl></pear-ctrl>
 </div>
 <div id="setup">
+      <button id="local-peer-name" class="name--btn"></button>
+      <div class="hidden" id="name--input--popup">
+         <input id="username-input" placeholder="Enter your name" />
+         <button id="username-submit">Submit</button>
+      </div>
   <div>
     <button id="create-canvas">Create</button>
   </div>
@@ -36,7 +41,7 @@
   </div>
 
   <div class="group">
-    <label class="label">Color <input id="color" type="color" value="#111111" /></label>
+    <label class="label">Color <input id="color" type="color" value="#111111" style="padding: 0" /></label>
     <label class="label">Size <input id="size" type="range" min="1" max="50" value="6" /></label>
   </div>
 
@@ -50,16 +55,20 @@
   <div class="group">
     <p>Key : </p><p id="canvas-topic"></p>
   </div>
-  <div class="group">
+  <button class="group" type="button" id="peer-count-btn">
     <p>Peers Count : </p><p id="peers-count">1</p>
-  </div>
+  </button>
 </header>
+
+<div id="peers-list" class="hidden">
+</div>
 
 <main class="board-wrap hidden">
   <canvas id="board" aria-label="Drawing canvas"></canvas>
   <p id="mouse-follower">You</p>
 </main>
 
-<script src="./app.js" type="module" defer></script>
+<script src="./app.js" type="module"></script>
+<script type="module" src="./helper.js"></script>
 </body>
 </html>

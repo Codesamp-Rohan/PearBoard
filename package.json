@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "b4a": "^1.7.2",
+    "hypercore": "^11.16.2",
     "hypercore-crypto": "^3.6.1",
     "hyperswarm": "^4.14.0"
   }
