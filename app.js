@@ -6,8 +6,11 @@
 import Hyperswarm from 'hyperswarm'
 import b4a from 'b4a'
 import crypto from 'hypercore-crypto'
+import {getRandomColorPair} from "./helper.js";
 
 let localPeerId = randomId()
+console.log(localPeerId)
+let peerName = ''
 
 // ---------- DOM ----------
 const $ = (s) => (document.querySelector(s))
@@ -25,6 +28,7 @@ const ui = {
   joinInput: ($('#join-canvas-topic')),
   topicOut: $('#canvas-topic'),
   peersCount: $('#peers-count'),
+  localPeerName: $('#local-peer-name'),
   // tools (from index.html)
   tools: ($('#tools')),
   color: ($('#color')),
@@ -33,20 +37,52 @@ const ui = {
   redo: ($('#redo')),
   clear: ($('#clear')),
   save: ($('#save')),
+
+  peerNameBtn: $('#username-submit'),
+  peerNameInput: $('#username-input'),
+
+  namePopup: $('#name--input--popup')
 }
+
+ui.localPeerName.addEventListener('click', (e) => {
+  e.preventDefault();
+  if (ui.namePopup.classList.contains('hidden')) {
+    ui.namePopup.classList.remove('hidden');
+  } else {
+    ui.namePopup.classList.add('hidden');
+  }
+});
+
+ui.localPeerName.innerHTML = localPeerId
+
+ui.peerNameBtn.addEventListener('click', e => {
+  e.preventDefault();
+  const username = ui.peerNameInput.value.trim();
+  if (username.length > 0) {
+    updatePeerName(localPeerId, username);
+    peerName = username;
+    ui.localPeerName.innerHTML = peerName
+    console.log('Local Peer ID set to', localPeerId, 'Username:', username);
+  }
+});
 
 // Mouse Follower ---------------------
 document.addEventListener("mousemove", (event) => {
-  updatePeerCursor(localPeerId, { x: event.clientX, y: event.clientY });
+  updatePeerCursor(localPeerId, peerName, { x: event.clientX, y: event.clientY });
   if (ui.mouse) ui.mouse.style.transform = `translate(${event.clientX}px, ${event.clientY}px)`;
-  broadcast({ t: 'cursor', from: localPeerId, x: event.clientX, y: event.clientY });
+  broadcast({ t: 'cursor', from: {name: peerName, id: localPeerId}, x: event.clientX, y: event.clientY });
 });
 
-
 const peerCursors = new Map()
+const peerNames = new Map()
 
-function updatePeerCursor(peerId, cursor) {
-  peerCursors.set(peerId, cursor); // peerId:string, cursor:{x:number,y:number}
+function updatePeerName(peerId, name) {
+  console.log('Line 61 peerId: ', peerId, 'name: ', name);
+  peerNames.set(peerId, name);
+}
+
+function updatePeerCursor(peerId, peerName, cursor) {
+  peerCursors.set(peerId, { name: peerName, cursor: cursor });
 }
 
 // ---------- Canvas & state ----------
@@ -751,40 +787,70 @@ function applyRemote(msg) {
       break
     }
     case 'cursor': {
-      // Update peer's cursor position
-      updatePeerCursor(msg.from, { x: msg.x, y: msg.y });
+      // if (msg.from.name === peerName || msg.from.id === localPeerId) return;
+      updatePeerCursor(msg.from.id, msg.from.name, { x: msg.x, y: msg.y });
       renderPeerCursors();
       break;
     }
   }
 }
 
+function logNames() {
+  console.log('Peer names:');
+  for (const [peerId, name] of peerNames) {
+    console.log(peerId, name);
+  }
+}
+
+function logCursors() {
+  console.log('Peer cursors:');
+  for (const [peerId, cur] of peerCursors) {
+    console.log(peerId, cur);
+  }
+}
+
+logNames()
+logCursors()
+
+const buttons = document.querySelectorAll('button');
+
+buttons.forEach(b => {
+  b.addEventListener('click', () => {
+    logNames()
+    logCursors()
+  })
+})
+
 function renderPeerCursors() {
-  // Remove old cursors
   document.querySelectorAll('.peer-cursor').forEach(el => el.remove());
 
-  // Draw cursor for each peer except local
   for (const [peerId, cur] of peerCursors.entries()) {
-    if (peerId === localPeerId) continue; // Skip local, local uses ui.mouse
+    if (peerId === localPeerId && peerName === cur.name) continue;
 
-    let el = document.createElement('div');
+    const {bg, text} = getRandomColorPair()
+
+    let el = document.createElement('p');
     el.className = 'peer-cursor';
     el.style.cssText = `
       position:fixed;
-      left:${cur.x}px; top:${cur.y}px;
+      left:${cur.cursor.x}px; top:${cur.cursor.y}px;
       width: fit-content;
-  height: fit-content;
-  background: #fb0066;
-  border-radius: 4px 50px 50px 50px;
-  pointer-events: none;
-  transition: left 60ms linear, top 60ms linear;
-  box-shadow: 0 6px 20px rgba(251, 0, 102, 0.2);
-  z-index: 9999;
-  color: #111111;
-  padding: 4px 8px;
+      height: fit-content;
+      background: ${bg};
+      border-radius: 4px 50px 50px 50px;
+      pointer-events: none;
+      transition: left 60ms linear, top 60ms linear;
+      box-shadow: 0 6px 20px rgba(251, 0, 102, 0.2);
+      z-index: 9999;
+      color: ${text};
+      padding: 4px 8px;
     `;
-    el.textContent = peerId.slice(-4); // Short peer id for demo
+    el.textContent = cur.name !== '' ? cur.name : peerId
     document.body.appendChild(el);
+  }
+
+  if (ui.mouse) {
+    ui.mouse.textContent = 'You';
   }
 }
 
@@ -798,7 +864,7 @@ function toCanvas(e) {
   return { x: e.clientX - r.left, y: e.clientY - r.top }
 }
 function randomId() {
-  return [...crypto.randomBytes(6)].map(b => b.toString(16).padStart(2, '0')).join('')
+  return crypto.randomBytes(4).toString('hex'); // 4 bytes → 8 hex chars
 }
 function hex(buf) { return Buffer.from(buf).toString('hex') }
 
