@@ -38,11 +38,16 @@
     <button class="btn" data-tool="ellipse" title="Ellipse (O)">⬭</button>
     <button class="btn" data-tool="diamond" title="Diamond (D)">⬥</button>
     <button class="btn" data-tool="text" title="Text (T)">🅣</button>
+    <button class="btn" data-tool="hand" title="Hand (H)">✋🏿</button>
   </div>
 
   <div class="group">
     <label class="label">Color <input id="color" type="color" value="#111111" style="padding: 0" /></label>
     <label class="label">Size <input id="size" type="range" min="1" max="50" value="6" /></label>
+  </div>
+  <div class="group">
+    <label for="opacity-control">Opacity:</label>
+    <input type="range" id="opacity-control" min="0" max="1" step="0.05" value="1" />
   </div>
 
   <div class="group">
@@ -64,6 +69,7 @@
 </div>
 
 <main class="board-wrap hidden">
+  <div id="zoom-scale-display" style="">100%</div>
   <canvas id="board" aria-label="Drawing canvas"></canvas>
   <p id="mouse-follower">You</p>
 </main>
