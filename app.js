@@ -1,892 +1,2117 @@
-// app.js — P2P Collaborative Whiteboard (stable networking + text + move)
+// app.js â€“ P2P Collaborative Whiteboard (Optimized with Fixed Mouse Tracking)
+
 // Runtime: Pear/Holepunch (browser), Hyperswarm, vanilla canvas
+
 // Keys: Shift = move/drag selection, Ctrl/Cmd+Z = undo, Ctrl/Cmd+Shift+Z = redo
+
 // Tools: P (pen), E (eraser), L (line), R (rect), O (ellipse), D (diamond), T (text)
 
-import Hyperswarm from 'hyperswarm'
-import b4a from 'b4a'
-import crypto from 'hypercore-crypto'
-import {getRandomColorPair} from "./helper.js";
+import Hyperswarm from 'hyperswarm';
+import b4a from 'b4a';
+import crypto from 'hypercore-crypto';
+import { getRandomColorPair } from "./helper.js";
 
-let localPeerId = randomId()
-console.log(localPeerId)
-let peerName = ''
+// ============================================================================
+// CONSTANTS & CONFIGURATION
+// ============================================================================
 
-// ---------- DOM ----------
-const $ = (s) => (document.querySelector(s))
+const CONFIG = {
+  WORLD_WIDTH: 50000,
+  WORLD_HEIGHT: 50000,
+  MIN_ZOOM: 0.2,
+  MAX_ZOOM: 8,
+  ZOOM_STEP: 1.1,
+  GRID_TARGET_PX: 32,
+  MIN_MINOR_PX: 8
+};
+
+// ============================================================================
+// GLOBAL STATE
+// ============================================================================
+
+class AppState {
+  constructor() {
+    this.localPeerId = this.generateRandomId();
+    this.peerName = '';
+    this.zoom = 1;
+    this.panX = 0;
+    this.panY = 0;
+    this.tool = 'pen';
+    this.strokeColor = '#000000';
+    this.strokeSize = 2;
+    this.drawing = false;
+    this.isDragging = false;
+    this.isPanning = false;
+    this.spaceHeld = false;
+    this.touchPanning = false;
+    this.showGrid = true;
+    this.dirty = true;
+
+    // Object state
+    this.activeId = null;
+    this.hoverId = null;
+    this.start = null;
+    this.dragOffset = { x: 0, y: 0 };
+    this.tempShape = null;
+    this.textEl = null;
+
+    // Document state
+    this.doc = {
+      objects: {},
+      order: [],
+      version: 0
+    };
+
+    // History
+    this.undoStack = [];
+    this.redoStack = [];
+
+    // Networking
+    this.swarm = null;
+    this.topicKey = null;
+    this.joined = false;
+    this.connections = new Set();
+    this.peerCount = 0;
+    this.outbox = [];
+    this.flushing = false;
+
+    // Cursor tracking
+    this.peerCursors = new Map();
+    this.peerNames = new Map();
+    this.lastCX = 0;
+    this.lastCY = 0;
+    this.lastTouchMid = null;
+
+    // Canvas
+    this.ctx = null;
+    this.DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+  }
+
+  generateRandomId() {
+    return crypto.randomBytes(4).toString('hex');
+  }
+
+  bumpDoc() {
+    this.doc.version++;
+  }
+
+  requestRender() {
+    this.dirty = true;
+  }
+}
+
+const state = new AppState();
+
+// ============================================================================
+// DOM UTILITIES
+// ============================================================================
+
+const $ = (selector) => document.querySelector(selector);
+
 const ui = {
+  // Session elements
   mouse: $('#mouse-follower'),
   setup: $('#setup'),
   loading: $('#loading'),
-  toolbar: (document.querySelector('header.toolbar')),
-  boardWrap: (document.querySelector('.board-wrap')),
-  canvas: ($('#board')),
-  overlayCanvas: ($('#overlay')),
-  // session controls (from index.html)
-  createBtn: ($('#create-canvas')),
-  joinBtn: ($('#join-canvas')),
-  joinInput: ($('#join-canvas-topic')),
+  toolbar: $('header.toolbar'),
+  boardWrap: $('.board-wrap'),
+  canvas: $('#board'),
+  overlayCanvas: $('#overlay'),
+
+  // Session controls
+  createBtn: $('#create-canvas'),
+  joinBtn: $('#join-canvas'),
+  joinInput: $('#join-canvas-topic'),
   topicOut: $('#canvas-topic'),
   peersCount: $('#peers-count'),
   localPeerName: $('#local-peer-name'),
-  // tools (from index.html)
-  tools: ($('#tools')),
-  color: ($('#color')),
-  size: ($('#size')),
-  undo: ($('#undo')),
-  redo: ($('#redo')),
-  clear: ($('#clear')),
-  save: ($('#save')),
 
+  // Tools
+  tools: $('#tools'),
+  color: $('#color'),
+  size: $('#size'),
+  undo: $('#undo'),
+  redo: $('#redo'),
+  clear: $('#clear'),
+  save: $('#save'),
   peerNameBtn: $('#username-submit'),
   peerNameInput: $('#username-input'),
+  namePopup: $('#name--input--popup'),
 
-  namePopup: $('#name--input--popup')
-}
+//   Canvas
+  scaleDisplay: $('#zoom-scale-display'),
+};
 
-ui.localPeerName.addEventListener('click', (e) => {
-  e.preventDefault();
-  if (ui.namePopup.classList.contains('hidden')) {
-    ui.namePopup.classList.remove('hidden');
-  } else {
-    ui.namePopup.classList.add('hidden');
-  }
-});
+// ============================================================================
+// COORDINATE UTILITIES
+// ============================================================================
 
-ui.localPeerName.innerHTML = localPeerId
-
-ui.peerNameBtn.addEventListener('click', e => {
-  e.preventDefault();
-  const username = ui.peerNameInput.value.trim();
-  if (username.length > 0) {
-    updatePeerName(localPeerId, username);
-    peerName = username;
-    ui.localPeerName.innerHTML = peerName
-    console.log('Local Peer ID set to', localPeerId, 'Username:', username);
-  }
-});
-
-// Mouse Follower ---------------------
-document.addEventListener("mousemove", (event) => {
-  updatePeerCursor(localPeerId, peerName, { x: event.clientX, y: event.clientY });
-  if (ui.mouse) ui.mouse.style.transform = `translate(${event.clientX}px, ${event.clientY}px)`;
-  broadcast({ t: 'cursor', from: {name: peerName, id: localPeerId}, x: event.clientX, y: event.clientY });
-});
-
-const peerCursors = new Map()
-const peerNames = new Map()
-
-function updatePeerName(peerId, name) {
-  console.log('Line 61 peerId: ', peerId, 'name: ', name);
-  peerNames.set(peerId, name);
-}
-
-function updatePeerCursor(peerId, peerName, cursor) {
-  peerCursors.set(peerId, { name: peerName, cursor: cursor });
-}
-
-// ---------- Canvas & state ----------
-const ctx = ui.canvas.getContext('2d', { alpha: true })
-let DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1))
-function resizeCanvas() {
-  const r = ui.boardWrap.getBoundingClientRect()
-  ui.canvas.width = Math.floor(r.width * DPR)
-  ui.canvas.height = Math.floor(r.height * DPR)
-  ui.canvas.style.width = `${r.width}px`
-  ui.canvas.style.height = `${r.height}px`
-  ctx.setTransform(DPR, 0, 0, DPR, 0, 0)
-  requestRender()
-}
-window.addEventListener('resize', resizeCanvas)
-
-const doc = {
-  objects: /** @type {Record<string, WhiteObj>} */({}),
-  order: /** @type {string[]} */([]), // z-order
-  version: 0
-}
-/**
- * @typedef {{ id:string, type:'pen'|'eraser'|'line'|'rect'|'ellipse'|'diamond'|'text',
- *   x:number, y:number, w?:number, h?:number,
- *   points?: {x:number,y:number}[], text?:string, font?:string, align?:CanvasTextAlign, baseline?:CanvasTextBaseline,
- *   color:string, size:number, createdBy:string, rev:number }} WhiteObj
- */
-
-let tool = 'pen'
-let strokeColor = ui.color.value
-let strokeSize = parseInt(ui.size.value, 10)
-let drawing = false
-let start = null /** @type {null|{x:number,y:number}} */
-let activeId = null // currently editing or created element id
-let hoverId = null
-let isDragging = false
-let dragOffset = { x: 0, y: 0 }
-
-// Text editor portal
-let textEl = /** @type {HTMLDivElement|null} */(null)
-
-// Undo/redo stacks (store ops)
-const undoStack = []
-const redoStack = []
-
-// Render flag
-let dirty = true
-function requestRender() {
-  dirty = true
-}
-function renderNow() {
-  if (!dirty) return
-  dirty = false
-  ctx.clearRect(0, 0, ui.canvas.width, ui.canvas.height)
-
-  // draw in z-order
-  for (const id of doc.order) {
-    const o = doc.objects[id]
-    if (!o) continue
-    drawObject(o)
+class CoordinateUtils {
+  static toCanvas(event) {
+    const rect = ui.canvas.getBoundingClientRect();
+    const clientX = event.clientX - rect.left;
+    const clientY = event.clientY - rect.top;
+    return {
+      x: (clientX - state.panX) / state.zoom,
+      y: (clientY - state.panY) / state.zoom
+    };
   }
 
-  // hover highlight
-  if (hoverId && doc.objects[hoverId]) {
-    const o = doc.objects[hoverId]
-    drawBounds(o, 'rgba(37,99,235,.35)')
+  static worldToScreen(worldX, worldY) {
+    return {
+      x: worldX * state.zoom + state.panX,
+      y: worldY * state.zoom + state.panY
+    };
+  }
+
+  static screenToWorld(screenX, screenY) {
+    return {
+      x: (screenX - state.panX) / state.zoom,
+      y: (screenY - state.panY) / state.zoom
+    };
   }
 }
-function rafLoop() {
-  renderNow()
-  requestAnimationFrame(rafLoop)
-}
-requestAnimationFrame(rafLoop)
 
-// ---------- Drawing primitives ----------
-function drawObject(o) {
-  ctx.save()
-  ctx.lineCap = 'round'
-  ctx.lineJoin = 'round'
-  ctx.strokeStyle = o.type === 'eraser' ? '#ffffff' : o.color
-  ctx.lineWidth = o.size
+// ============================================================================
+// CANVAS MANAGEMENT
+// ============================================================================
 
-  switch (o.type) {
-    case 'pen':
-    case 'eraser': {
-      const pts = o.points || []
-      if (pts.length < 2) break
-      if (o.type === 'eraser') ctx.globalCompositeOperation = 'destination-out'
-      ctx.beginPath()
-      ctx.moveTo(pts[0].x, pts[0].y)
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y)
-      ctx.stroke()
-      ctx.globalCompositeOperation = 'source-over'
-      break
-    }
-    case 'line': {
-      ctx.beginPath()
-      ctx.moveTo(o.x, o.y)
-      ctx.lineTo(o.x + (o.w || 0), o.y + (o.h || 0))
-      ctx.stroke()
-      break
-    }
-    case 'rect': {
-      ctx.strokeRect(o.x, o.y, o.w || 0, o.h || 0)
-      break
-    }
-    case 'ellipse': {
-      const rx = Math.abs(o.w || 0) / 2
-      const ry = Math.abs(o.h || 0) / 2
-      const cx = o.x + (o.w || 0) / 2
-      const cy = o.y + (o.h || 0) / 2
-      ctx.beginPath()
-      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2)
-      ctx.stroke()
-      break
-    }
-    case 'diamond': {
-      const w = o.w || 0, h = o.h || 0
-      const cx = o.x + w / 2, cy = o.y + h / 2
-      ctx.beginPath()
-      ctx.moveTo(cx, o.y)
-      ctx.lineTo(o.x + w, cy)
-      ctx.lineTo(cx, o.y + h)
-      ctx.lineTo(o.x, cy)
-      ctx.closePath()
-      ctx.stroke()
-      break
-    }
-    case 'text': {
-      ctx.fillStyle = o.color
-      ctx.font = o.font || '16px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial'
-      ctx.textAlign = o.align || 'left'
-      ctx.textBaseline = o.baseline || 'top'
-      // draw a faint rect for visibility of selection handled elsewhere
-      ctx.fillText(o.text || '', o.x, o.y)
-      break
-    }
+class CanvasManager {
+  static init() {
+    state.ctx = ui.canvas.getContext('2d', { alpha: true });
+    this.resizeCanvas();
+    this.setupEventListeners();
+    this.startRenderLoop();
   }
-  ctx.restore()
-}
 
-function drawBounds(o, color = 'rgba(0,0,0,.2)') {
-  ctx.save()
-  ctx.setLineDash([6, 6])
-  ctx.lineWidth = 1
-  ctx.strokeStyle = color
-  const b = bounds(o)
-  ctx.strokeRect(b.x, b.y, b.w, b.h)
-  ctx.restore()
-}
+  static resizeCanvas() {
+    const rect = ui.boardWrap.getBoundingClientRect();
+    ui.canvas.width = Math.floor(rect.width * state.DPR);
+    ui.canvas.height = Math.floor(rect.height * state.DPR);
+    ui.canvas.style.width = `${rect.width}px`;
+    ui.canvas.style.height = `${rect.height}px`;
+    state.ctx.setTransform(state.DPR, 0, 0, state.DPR, 0, 0);
+    this.clampPan();
+    state.requestRender();
+  }
 
-function bounds(o) {
-  switch (o.type) {
-    case 'pen':
-    case 'eraser': {
-      const pts = o.points || []
-      let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity
-      for (const p of pts) {
-        if (p.x < minx) minx = p.x
-        if (p.y < miny) miny = p.y
-        if (p.x > maxx) maxx = p.x
-        if (p.y > maxy) maxy = p.y
+  static clampPan() {
+    const viewWidthWorld = ui.canvas.clientWidth / state.zoom;
+    const viewHeightWorld = ui.canvas.clientHeight / state.zoom;
+    let leftWorld = -state.panX / state.zoom;
+    let topWorld = -state.panY / state.zoom;
+
+    // Clamp to world boundaries
+    leftWorld = Math.max(0, Math.min(leftWorld, CONFIG.WORLD_WIDTH - viewWidthWorld));
+    topWorld = Math.max(0, Math.min(topWorld, CONFIG.WORLD_HEIGHT - viewHeightWorld));
+
+    state.panX = -leftWorld * state.zoom;
+    state.panY = -topWorld * state.zoom;
+  }
+
+  static centerView() {
+    const viewWidth = ui.canvas.clientWidth;
+    const viewHeight = ui.canvas.clientHeight;
+    const startLeftWorld = (CONFIG.WORLD_WIDTH - viewWidth / state.zoom) / 2;
+    const startTopWorld = (CONFIG.WORLD_HEIGHT - viewHeight / state.zoom) / 2;
+    state.panX = -startLeftWorld * state.zoom;
+    state.panY = -startTopWorld * state.zoom;
+  }
+
+  static setupEventListeners() {
+    window.addEventListener('resize', () => {
+      this.resizeCanvas();
+      if (typeof CursorManager !== 'undefined') {
+        CursorManager.handleWindowResize();
       }
-      return { x: minx, y: miny, w: (maxx - minx) || 0, h: (maxy - miny) || 0 }
+    });
+
+    ui.canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      this.handleWheel(e);
+    }, { passive: false });
+  }
+
+  static handleWheel(event) {
+    const factor = (event.deltaY < 0) ? CONFIG.ZOOM_STEP : (1 / CONFIG.ZOOM_STEP);
+    const rect = ui.canvas.getBoundingClientRect();
+    const clientX = event.clientX - rect.left;
+    const clientY = event.clientY - rect.top;
+    const newZoom = Math.min(CONFIG.MAX_ZOOM, Math.max(CONFIG.MIN_ZOOM, state.zoom * factor));
+
+    const worldX = (clientX - state.panX) / state.zoom;
+    const worldY = (clientY - state.panY) / state.zoom;
+
+    state.zoom = newZoom;
+    state.panX = clientX - worldX * state.zoom;
+    state.panY = clientY - worldY * state.zoom;
+
+    // Scale Percentage
+    const scalePercent = Math.round(state.zoom * 100);
+    const scaleDisplay = document.getElementById('zoom-scale-display');
+    if (scaleDisplay) {
+      scaleDisplay.textContent = scalePercent + '%';
     }
-    case 'line': return { x: Math.min(o.x, o.x + (o.w || 0)), y: Math.min(o.y, o.y + (o.h || 0)),
-      w: Math.abs(o.w || 0), h: Math.abs(o.h || 0) }
-    case 'rect':
-    case 'ellipse':
-    case 'diamond': return { x: Math.min(o.x, o.x + (o.w || 0)), y: Math.min(o.y, o.y + (o.h || 0)),
-      w: Math.abs(o.w || 0), h: Math.abs(o.h || 0) }
-    case 'text': {
-      // coarse measure: approximate width via canvas measureText
-      ctx.save()
-      ctx.font = o.font || '16px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial'
-      const metrics = ctx.measureText(o.text || '')
-      const w = Math.max(10, metrics.width)
-      const h = Math.max(16, metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent || 20)
-      ctx.restore()
-      return { x: o.x, y: o.y, w, h }
+
+    this.clampPan();
+    state.requestRender();
+
+    CursorManager.handleCanvasTransform();
+  }
+
+  static startRenderLoop() {
+    const render = () => {
+      this.renderFrame();
+      requestAnimationFrame(render);
+    };
+    requestAnimationFrame(render);
+  }
+
+  static renderFrame() {
+    if (!state.dirty) return;
+    state.dirty = false;
+
+    // Clear canvas
+    state.ctx.setTransform(1, 0, 0, 1, 0, 0);
+    state.ctx.clearRect(0, 0, ui.canvas.width, ui.canvas.height);
+
+    // Set world transform
+    const scale = state.DPR * state.zoom;
+    const translateX = Math.round(state.DPR * state.panX);
+    const translateY = Math.round(state.DPR * state.panY);
+    state.ctx.setTransform(scale, 0, 0, scale, translateX, translateY);
+
+    // Render grid
+    if (state.showGrid) {
+      GridRenderer.render(state.ctx, scale, translateX, translateY);
+    }
+
+    // Render objects
+    ObjectRenderer.renderAll();
+
+    // Render temporary shapes and hover states
+    if (state.tempShape) {
+      ObjectRenderer.renderTemp(state.tempShape);
+    }
+
+    if (state.hoverId && state.doc.objects[state.hoverId]) {
+      ObjectRenderer.renderBounds(state.doc.objects[state.hoverId], 'rgba(37,99,235,.35)');
     }
   }
-  return { x: o.x, y: o.y, w: Math.abs(o.w || 0), h: Math.abs(o.h || 0) }
 }
 
-function pointIn(o, x, y) {
-  const b = bounds(o)
-  return x >= b.x && y >= b.y && x <= b.x + b.w && y <= b.y + b.h
-}
+// ============================================================================
+// GRID RENDERING
+// ============================================================================
 
-// ---------- Tool helpers ----------
-function selectTool(name) {
-  tool = name
-  ;[...ui.tools.querySelectorAll('.btn')].forEach(b => {
-    b.classList.toggle('active', b.dataset.tool === name)
-  })
-  closeTextEditor(true)
-}
+class GridRenderer {
+  static render(ctx, scale, translateX, translateY) {
+    const viewWidth = ui.canvas.clientWidth;
+    const viewHeight = ui.canvas.clientHeight;
 
-function beginFree(id, type, x, y) {
-  const obj = {
-    id, type, x, y, points: [{ x, y }], color: strokeColor, size: strokeSize,
-    createdBy: localPeerId, rev: 0
-  }
-  addObject(obj, true)
-  activeId = id
-}
-function addPoint(id, x, y) {
-  const o = doc.objects[id]; if (!o || !o.points) return
-  o.points.push({ x, y }); o.rev++; bumpDoc()
-  requestRender(); queueOp({ t: 'patch', id, path: 'points', push: { x, y } })
-}
-function finishStroke(id) {
-  if (!id) return
-  queueOp({ t: 'touch', id }) // bump rev on network
-}
+    // Calculate visible world area
+    const leftWorld = -state.panX / state.zoom;
+    const topWorld = -state.panY / state.zoom;
+    const rightWorld = leftWorld + viewWidth / state.zoom;
+    const bottomWorld = topWorld + viewHeight / state.zoom;
 
-// Shape create/resize
-function beginShape(id, type, x, y) {
-  const obj = { id, type, x, y, w: 0, h: 0, color: strokeColor, size: strokeSize,
-    createdBy: localPeerId, rev: 0 }
-  addObject(obj, true)
-  activeId = id
-}
-function resizeShape(id, x, y) {
-  const o = doc.objects[id]; if (!o) return
-  o.w = x - o.x; o.h = y - o.y; o.rev++; bumpDoc()
-  requestRender()
-  queueOp({ t: 'update', id, patch: { w: o.w, h: o.h, rev: o.rev } })
-}
+    // Calculate grid spacing
+    const desiredWorld = CONFIG.GRID_TARGET_PX / state.zoom;
+    const majorStep = this.calculateNiceStep(desiredWorld);
+    const minorStep = majorStep / 5;
 
-function commitTextFromEditor() {
-  if (!textEl) return
-  const id = textEl.dataset.id
-  const o = doc.objects[id]
-  if (!o) { closeTextEditor(true); return }
-  const txt = textEl.textContent || ''
-  o.text = txt
-  o.rev++; bumpDoc()
-  requestRender()
-  queueOp({ t: 'update', id, patch: { text: o.text, rev: o.rev } })
-  closeTextEditor(true)
-}
+    // Check visibility thresholds
+    const majorPixels = majorStep * state.zoom;
+    const minorPixels = minorStep * state.zoom;
+    const showMinor = minorPixels >= CONFIG.MIN_MINOR_PX;
 
-function openTextEditor(x, y, initial = '') {
-  closeTextEditor(true)
-  const id = randomId()
-  const fontPx = Math.max(12, strokeSize * 3)
-  const obj = {
-    id, type: 'text', x, y, text: initial, color: strokeColor, size: strokeSize,
-    font: `${fontPx}px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial`,
-    align: 'left', baseline: 'top', createdBy: localPeerId, rev: 0
-  }
-  addObject(obj, true)
-  activeId = id
+    // Switch to screen space for crisp lines
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.lineWidth = 1;
 
-  const div = document.createElement('div')
-  div.className = 'text-editor'
-  div.contentEditable = 'true'
-  div.style.left = `${x}px`
-  div.style.top = `${y}px`
-  div.style.font = obj.font
-  div.style.color = obj.color
-  div.dataset.id = id
-  div.spellcheck = false
-  div.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      commitTextFromEditor()
-    } else if (e.key === 'Escape') {
-      e.preventDefault()
-      closeTextEditor(true)
+    // Render minor grid
+    if (showMinor) {
+      this.renderGridLines(ctx, minorStep, leftWorld, topWorld, rightWorld, bottomWorld,
+          scale, translateX, translateY, 'rgba(0,0,0,0.05)');
     }
-  })
-  div.addEventListener('blur', () => commitTextFromEditor())
-  ui.boardWrap.appendChild(div)
-  textEl = div
-  // place caret
-  setTimeout(() => {
-    div.focus()
-    placeCaretAtEnd(div)
-  }, 0)
-}
 
-function closeTextEditor(commit) {
-  if (!textEl) return
-  const el = textEl
-  textEl = null
-  if (commit) {
-    // handled in commitTextFromEditor
+    // Render major grid
+    this.renderGridLines(ctx, majorStep, leftWorld, topWorld, rightWorld, bottomWorld,
+        scale, translateX, translateY, 'rgba(0,0,0,0.12)');
+
+    // Render axes
+    this.renderAxes(ctx, scale, translateX, translateY);
+
+    ctx.restore();
+
+    // Restore world transform
+    ctx.setTransform(scale, 0, 0, scale, translateX, translateY);
   }
-  if (el.parentNode === ui.boardWrap) {
-    ui.boardWrap.removeChild(el)
+
+  static renderGridLines(ctx, step, leftWorld, topWorld, rightWorld, bottomWorld,
+                         scale, translateX, translateY, color) {
+    ctx.strokeStyle = color;
+
+    const startX = Math.floor(leftWorld / step) * step;
+    const startY = Math.floor(topWorld / step) * step;
+
+    // Vertical lines
+    for (let x = startX; x <= rightWorld; x += step) {
+      const screenX = Math.round(scale * x + translateX) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(screenX, 0);
+      ctx.lineTo(screenX, ui.canvas.height);
+      ctx.stroke();
+    }
+
+    // Horizontal lines
+    for (let y = startY; y <= bottomWorld; y += step) {
+      const screenY = Math.round(scale * y + translateY) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(0, screenY);
+      ctx.lineTo(ui.canvas.width, screenY);
+      ctx.stroke();
+    }
+  }
+
+  static renderAxes(ctx, scale, translateX, translateY) {
+    const screenX0 = Math.round(scale * 0 + translateX) + 0.5;
+    const screenY0 = Math.round(scale * 0 + translateY) + 0.5;
+
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+
+    // Y-axis
+    if (screenX0 >= 0 && screenX0 <= ui.canvas.width) {
+      ctx.beginPath();
+      ctx.moveTo(screenX0, 0);
+      ctx.lineTo(screenX0, ui.canvas.height);
+      ctx.stroke();
+    }
+
+    // X-axis
+    if (screenY0 >= 0 && screenY0 <= ui.canvas.height) {
+      ctx.beginPath();
+      ctx.moveTo(0, screenY0);
+      ctx.lineTo(ui.canvas.width, screenY0);
+      ctx.stroke();
+    }
+  }
+
+  static calculateNiceStep(value) {
+    if (value <= 0) return 1;
+    const exponent = Math.floor(Math.log10(value));
+    const base = Math.pow(10, exponent);
+    const normalized = value / base;
+
+    if (normalized <= 1) return 1 * base;
+    if (normalized <= 2) return 2 * base;
+    if (normalized <= 5) return 5 * base;
+    return 10 * base;
   }
 }
 
-function placeCaretAtEnd(el) {
-  const range = document.createRange()
-  range.selectNodeContents(el)
-  range.collapse(false)
-  const sel = window.getSelection()
-  sel.removeAllRanges()
-  sel.addRange(range)
-}
+// ============================================================================
+// OBJECT RENDERING
+// ============================================================================
 
-// ---------- Scene ops (apply locally + network queue) ----------
-function bumpDoc() { doc.version++ }
-
-function addObject(o, isLocal=false) {
-  if (doc.objects[o.id]) return // idempotent
-  doc.objects[o.id] = o
-  doc.order.push(o.id)
-  bumpDoc()
-  requestRender()
-  if (isLocal) {
-    pushUndo({ t: 'del', id: o.id, before: o })
-    queueOp({ t: 'add', obj: o })
-  }
-}
-
-function updateObject(id, patch, isLocal=false) {
-  const o = doc.objects[id]; if (!o) return
-  const before = { ...o }
-  Object.assign(o, patch)
-  bumpDoc(); requestRender()
-  if (isLocal) {
-    pushUndo({ t: 'update', id, before, after: { ...o } })
-    queueOp({ t: 'update', id, patch })
-  }
-}
-
-function deleteAll(isLocal=false) {
-  const snapshot = JSON.stringify(doc)
-  doc.objects = {}
-  doc.order = []
-  bumpDoc(); requestRender()
-  if (isLocal) {
-    pushUndo({ t: 'restore', snapshot })
-    queueOp({ t: 'clear' })
-  }
-}
-
-// Undo/redo
-function pushUndo(entry) { undoStack.push(entry); redoStack.length = 0 }
-function doUndo() {
-  const e = undoStack.pop(); if (!e) return
-  switch (e.t) {
-    case 'del': { // undo add → delete
-      const { id, before } = e
-      const obj = doc.objects[id]
+class ObjectRenderer {
+  static renderAll() {
+    for (const id of state.doc.order) {
+      const obj = state.doc.objects[id];
       if (obj) {
-        delete doc.objects[id]
-        doc.order = doc.order.filter(x => x !== id)
-        bumpDoc(); requestRender()
-        queueOp({ t: 'delete', id })
-        redoStack.push({ t: 'add', obj: before })
+        this.renderObject(obj);
       }
-      break
     }
-    case 'update': {
-      const { id, before, after } = e
-      doc.objects[id] = before
-      bumpDoc(); requestRender()
-      queueOp({ t: 'update', id, patch: before })
-      redoStack.push({ t: 'update', id, before: after, after: before })
-      break
+  }
+
+  static renderObject(obj) {
+    state.ctx.save();
+    const strokeWidth = (obj.strokeWidth ?? 2) / state.zoom;
+    state.ctx.lineWidth = obj.size;
+    state.ctx.lineCap = 'round';
+    state.ctx.lineJoin = 'round';
+    state.ctx.strokeStyle = obj.type === 'eraser' ? '#ffffff' : obj.color;
+
+    switch (obj.type) {
+      case 'pen':
+      case 'eraser':
+        this.renderPath(obj);
+        break;
+      case 'line':
+        this.renderLine(obj);
+        break;
+      case 'rect':
+        this.renderRect(obj);
+        break;
+      case 'ellipse':
+        this.renderEllipse(obj);
+        break;
+      case 'diamond':
+        this.renderDiamond(obj);
+        break;
+      case 'text':
+        this.renderText(obj);
+        break;
     }
-    case 'restore': {
-      const snap = JSON.stringify(doc)
-      Object.assign(doc, JSON.parse(e.snapshot))
-      bumpDoc(); requestRender()
-      queueOp({ t: 'full', snapshot: e.snapshot })
-      redoStack.push({ t: 'restore', snapshot: snap })
-      break
+
+    state.ctx.restore();
+  }
+
+  static renderPath(obj) {
+    const points = obj.points || [];
+    if (points.length < 2) return;
+
+    if (obj.type === 'eraser') {
+      state.ctx.globalCompositeOperation = 'destination-out';
+    }
+
+    state.ctx.beginPath();
+    state.ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+      state.ctx.lineTo(points[i].x, points[i].y);
+    }
+
+    state.ctx.stroke();
+    state.ctx.globalCompositeOperation = 'source-over';
+  }
+
+  static renderLine(obj) {
+    state.ctx.beginPath();
+    state.ctx.moveTo(obj.x, obj.y);
+    state.ctx.lineTo(obj.x + (obj.w || 0), obj.y + (obj.h || 0));
+    state.ctx.stroke();
+  }
+
+  static renderRect(obj) {
+    state.ctx.strokeRect(obj.x, obj.y, obj.w || 0, obj.h || 0);
+  }
+
+  static renderEllipse(obj) {
+    const radiusX = Math.abs(obj.w || 0) / 2;
+    const radiusY = Math.abs(obj.h || 0) / 2;
+    const centerX = obj.x + (obj.w || 0) / 2;
+    const centerY = obj.y + (obj.h || 0) / 2;
+
+    state.ctx.beginPath();
+    state.ctx.ellipse(centerX, centerY, radiusX, radiusY, 0, 0, Math.PI * 2);
+    state.ctx.stroke();
+  }
+
+  static renderDiamond(obj) {
+    const width = obj.w || 0;
+    const height = obj.h || 0;
+    const centerX = obj.x + width / 2;
+    const centerY = obj.y + height / 2;
+
+    state.ctx.beginPath();
+    state.ctx.moveTo(centerX, obj.y);
+    state.ctx.lineTo(obj.x + width, centerY);
+    state.ctx.lineTo(centerX, obj.y + height);
+    state.ctx.lineTo(obj.x, centerY);
+    state.ctx.closePath();
+    state.ctx.stroke();
+  }
+
+  static renderText(obj) {
+    state.ctx.fillStyle = obj.color;
+    state.ctx.font = obj.font || '16px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial';
+    state.ctx.textAlign = obj.align || 'left';
+    state.ctx.textBaseline = obj.baseline || 'top';
+    state.ctx.fillText(obj.text || '', obj.x, obj.y);
+  }
+
+  static renderBounds(obj, color = 'rgba(0,0,0,.2)') {
+    state.ctx.save();
+    state.ctx.setLineDash([6, 6]);
+    state.ctx.lineWidth = 1;
+    state.ctx.strokeStyle = color;
+
+    const bounds = GeometryUtils.getBounds(obj);
+    state.ctx.strokeRect(bounds.x, bounds.y, bounds.w, bounds.h);
+
+    state.ctx.restore();
+  }
+
+  static renderTemp(tempObj) {
+    state.ctx.save();
+    state.ctx.setLineDash([6 / state.zoom, 6 / state.zoom]);
+    state.ctx.lineWidth = (tempObj.strokeWidth ?? 2) / state.zoom;
+    this.renderObject(tempObj);
+    state.ctx.restore();
+  }
+}
+
+// ============================================================================
+// GEOMETRY UTILITIES
+// ============================================================================
+
+class GeometryUtils {
+  static getBounds(obj) {
+    switch (obj.type) {
+      case 'pen':
+      case 'eraser':
+        return this.getPathBounds(obj);
+      case 'line':
+        return this.getLineBounds(obj);
+      case 'rect':
+      case 'ellipse':
+      case 'diamond':
+        return this.getRectBounds(obj);
+      case 'text':
+        return this.getTextBounds(obj);
+      default:
+        return { x: obj.x, y: obj.y, w: Math.abs(obj.w || 0), h: Math.abs(obj.h || 0) };
+    }
+  }
+
+  static getPathBounds(obj) {
+    const points = obj.points || [];
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+    for (const point of points) {
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+    }
+
+    return {
+      x: minX,
+      y: minY,
+      w: (maxX - minX) || 0,
+      h: (maxY - minY) || 0
+    };
+  }
+
+  static getLineBounds(obj) {
+    return {
+      x: Math.min(obj.x, obj.x + (obj.w || 0)),
+      y: Math.min(obj.y, obj.y + (obj.h || 0)),
+      w: Math.abs(obj.w || 0),
+      h: Math.abs(obj.h || 0)
+    };
+  }
+
+  static getRectBounds(obj) {
+    return {
+      x: Math.min(obj.x, obj.x + (obj.w || 0)),
+      y: Math.min(obj.y, obj.y + (obj.h || 0)),
+      w: Math.abs(obj.w || 0),
+      h: Math.abs(obj.h || 0)
+    };
+  }
+
+  static getTextBounds(obj) {
+    state.ctx.save();
+    state.ctx.font = obj.font || '16px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial';
+    const metrics = state.ctx.measureText(obj.text || '');
+    const width = Math.max(10, metrics.width);
+    const height = Math.max(16, metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent || 20);
+    state.ctx.restore();
+    return { x: obj.x, y: obj.y, w: width, h: height };
+  }
+
+  static pointInBounds(obj, x, y) {
+    const bounds = this.getBounds(obj);
+    return x >= bounds.x && y >= bounds.y &&
+        x <= bounds.x + bounds.w && y <= bounds.y + bounds.h;
+  }
+}
+
+// ============================================================================
+// DRAWING TOOLS
+// ============================================================================
+
+class DrawingTools {
+  static selectTool(toolName) {
+    state.tool = toolName;
+    // Update UI
+    [...ui.tools.querySelectorAll('.btn')].forEach(button => {
+      button.classList.toggle('active', button.dataset.tool === toolName);
+    });
+    TextEditor.close(true);
+  }
+
+  static beginFreeDrawing(id, type, x, y) {
+    const obj = {
+      id,
+      type,
+      x,
+      y,
+      points: [{ x, y }],
+      color: state.strokeColor,
+      size: state.strokeSize,
+      createdBy: state.localPeerId,
+      rev: 0
+    };
+
+    DocumentManager.addObject(obj, true);
+    state.activeId = id;
+  }
+
+  static addPoint(id, x, y) {
+    const obj = state.doc.objects[id];
+    if (!obj || !obj.points) return;
+
+    obj.points.push({ x, y });
+    obj.rev++;
+    state.bumpDoc();
+    state.requestRender();
+    NetworkManager.queueOperation({ t: 'patch', id, path: 'points', push: { x, y } });
+  }
+
+  static finishStroke(id) {
+    if (!id) return;
+    NetworkManager.queueOperation({ t: 'touch', id });
+  }
+
+  static beginShape(id, type, x, y) {
+    const obj = {
+      id,
+      type,
+      x,
+      y,
+      w: 0,
+      h: 0,
+      color: state.strokeColor,
+      size: state.strokeSize,
+      createdBy: state.localPeerId,
+      rev: 0
+    };
+
+    DocumentManager.addObject(obj, true);
+    state.activeId = id;
+  }
+
+  static resizeShape(id, x, y) {
+    const obj = state.doc.objects[id];
+    if (!obj) return;
+
+    obj.w = x - obj.x;
+    obj.h = y - obj.y;
+    obj.rev++;
+    state.bumpDoc();
+    state.requestRender();
+
+    NetworkManager.queueOperation({
+      t: 'update',
+      id,
+      patch: { w: obj.w, h: obj.h, rev: obj.rev }
+    });
+  }
+}
+
+// ============================================================================
+// TEXT EDITOR
+// ============================================================================
+
+class TextEditor {
+  static open(worldX, worldY, initialText = '') {
+    this.close(true);
+
+    const id = state.generateRandomId();
+    const fontPixels = Math.max(12, state.strokeSize * 3);
+
+    // Create text object
+    const textObj = {
+      id,
+      type: 'text',
+      x: worldX,
+      y: worldY,
+      text: initialText,
+      color: state.strokeColor,
+      size: state.strokeSize,
+      font: `${fontPixels}px Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial`,
+      align: 'left',
+      baseline: 'top',
+      createdBy: state.localPeerId,
+      rev: 0
+    };
+
+    DocumentManager.addObject(textObj, true);
+    state.activeId = id;
+
+    // Create editor element
+    const screenPos = CoordinateUtils.worldToScreen(worldX, worldY);
+    const canvasRect = ui.canvas.getBoundingClientRect();
+
+    const editorDiv = this.createEditorElement(
+        screenPos.x + canvasRect.left,
+        screenPos.y + canvasRect.top,
+        textObj,
+        fontPixels,
+        initialText
+    );
+
+    document.body.appendChild(editorDiv);
+    state.textEl = editorDiv;
+
+    // Focus and position cursor
+    setTimeout(() => {
+      editorDiv.focus();
+      if (initialText) {
+        this.placeCaretAtEnd(editorDiv);
+      }
+    }, 0);
+  }
+
+  static createEditorElement(x, y, textObj, fontPixels, initialText) {
+    const div = document.createElement('div');
+    div.className = 'text-editor';
+    div.contentEditable = 'true';
+    div.dataset.id = textObj.id;
+    div.spellcheck = false;
+
+    Object.assign(div.style, {
+      position: 'absolute',
+      left: `${x}px`,
+      top: `${y}px`,
+      font: textObj.font,
+      fontSize: `${fontPixels}px`,
+      color: textObj.color,
+      border: '2px solid #007bff',
+      background: 'rgba(255, 255, 255, 0.95)',
+      borderRadius: '4px',
+      padding: '4px 6px',
+      margin: '0',
+      outline: 'none',
+      boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+      zIndex: '9999',
+      whiteSpace: 'nowrap',
+      overflow: 'visible',
+      minWidth: '20px',
+      minHeight: '16px',
+      transformOrigin: 'top left',
+      transform: state.zoom !== 1 ? `scale(${state.zoom})` : 'none'
+    });
+
+    if (initialText) {
+      div.textContent = initialText;
+    }
+
+    this.attachEditorEventListeners(div);
+    return div;
+  }
+
+  static attachEditorEventListeners(div) {
+    div.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        this.commit();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        this.close(false);
+      }
+    });
+
+    div.addEventListener('blur', () => {
+      setTimeout(() => this.commit(), 100);
+    });
+
+    // Prevent canvas events
+    ['mousedown', 'mousemove', 'mouseup'].forEach(eventType => {
+      div.addEventListener(eventType, (e) => e.stopPropagation());
+    });
+  }
+
+  static commit() {
+    if (!state.textEl) return;
+
+    const id = state.textEl.dataset.id;
+    const obj = state.doc.objects[id];
+    if (!obj) {
+      this.close(false);
+      return;
+    }
+
+    const text = (state.textEl.textContent || '').trim();
+    if (text === '') {
+      // Remove empty text object
+      DocumentManager.deleteObject(id, true);
+    } else {
+      // Update text object
+      DocumentManager.updateObject(id, { text, rev: obj.rev + 1 }, true);
+    }
+
+    this.close(false);
+  }
+
+  static close(shouldCommit = false) {
+    if (!state.textEl) return;
+
+    const element = state.textEl;
+    const id = element.dataset.id;
+    state.textEl = null;
+    state.activeId = null;
+
+    if (element.parentNode) {
+      element.parentNode.removeChild(element);
+    }
+
+    // Clean up empty object if not committing
+    if (!shouldCommit && id && state.doc.objects[id] && !state.doc.objects[id].text) {
+      DocumentManager.deleteObject(id, false);
+    }
+  }
+
+  static placeCaretAtEnd(element) {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+}
+
+// ============================================================================
+// DOCUMENT MANAGEMENT
+// ============================================================================
+
+class DocumentManager {
+  static addObject(obj, isLocal = false) {
+    if (state.doc.objects[obj.id]) return; // Idempotent
+
+    state.doc.objects[obj.id] = obj;
+    state.doc.order.push(obj.id);
+    state.bumpDoc();
+    state.requestRender();
+
+    if (isLocal) {
+      HistoryManager.pushUndo({ t: 'del', id: obj.id, before: obj });
+      NetworkManager.queueOperation({ t: 'add', obj });
+    }
+  }
+
+  static updateObject(id, patch, isLocal = false) {
+    const obj = state.doc.objects[id];
+    if (!obj) return;
+
+    const before = { ...obj };
+    Object.assign(obj, patch);
+    state.bumpDoc();
+    state.requestRender();
+
+    if (isLocal) {
+      HistoryManager.pushUndo({ t: 'update', id, before, after: { ...obj } });
+      NetworkManager.queueOperation({ t: 'update', id, patch });
+    }
+  }
+
+  static deleteObject(id, isLocal = false) {
+    const obj = state.doc.objects[id];
+    if (!obj) return;
+
+    delete state.doc.objects[id];
+    state.doc.order = state.doc.order.filter(objId => objId !== id);
+    state.bumpDoc();
+    state.requestRender();
+
+    if (isLocal) {
+      HistoryManager.pushUndo({ t: 'add', obj });
+      NetworkManager.queueOperation({ t: 'delete', id });
+    }
+  }
+
+  static clearAll(isLocal = false) {
+    const snapshot = JSON.stringify(state.doc);
+    state.doc.objects = {};
+    state.doc.order = [];
+    state.bumpDoc();
+    state.requestRender();
+
+    if (isLocal) {
+      HistoryManager.pushUndo({ t: 'restore', snapshot });
+      NetworkManager.queueOperation({ t: 'clear' });
+    }
+  }
+
+  static findTopObjectAt(x, y) {
+    for (let i = state.doc.order.length - 1; i >= 0; i--) {
+      const id = state.doc.order[i];
+      const obj = state.doc.objects[id];
+      if (obj && GeometryUtils.pointInBounds(obj, x, y)) {
+        return id;
+      }
+    }
+    return null;
+  }
+}
+
+// ============================================================================
+// HISTORY MANAGEMENT
+// ============================================================================
+
+class HistoryManager {
+  static pushUndo(entry) {
+    state.undoStack.push(entry);
+    state.redoStack.length = 0; // Clear redo stack
+  }
+
+  static undo() {
+    const entry = state.undoStack.pop();
+    if (!entry) return;
+
+    switch (entry.t) {
+      case 'del': // Undo add â†’ delete
+        const obj = state.doc.objects[entry.id];
+        if (obj) {
+          DocumentManager.deleteObject(entry.id, false);
+          state.redoStack.push({ t: 'add', obj: entry.before });
+        }
+        break;
+
+      case 'add': // Undo delete â†’ add
+        DocumentManager.addObject(entry.obj, false);
+        state.redoStack.push({ t: 'del', id: entry.obj.id, before: entry.obj });
+        break;
+
+      case 'update':
+        state.doc.objects[entry.id] = entry.before;
+        state.bumpDoc();
+        state.requestRender();
+        NetworkManager.queueOperation({ t: 'update', id: entry.id, patch: entry.before });
+        state.redoStack.push({ t: 'update', id: entry.id, before: entry.after, after: entry.before });
+        break;
+
+      case 'restore':
+        const currentSnapshot = JSON.stringify(state.doc);
+        Object.assign(state.doc, JSON.parse(entry.snapshot));
+        state.bumpDoc();
+        state.requestRender();
+        NetworkManager.queueOperation({ t: 'full', snapshot: entry.snapshot });
+        state.redoStack.push({ t: 'restore', snapshot: currentSnapshot });
+        break;
+    }
+  }
+
+  static redo() {
+    const entry = state.redoStack.pop();
+    if (!entry) return;
+
+    switch (entry.t) {
+      case 'add':
+        DocumentManager.addObject(entry.obj, true);
+        break;
+
+      case 'update':
+        DocumentManager.updateObject(entry.id, entry.after, true);
+        break;
+
+      case 'restore':
+        const currentSnapshot = JSON.stringify(state.doc);
+        Object.assign(state.doc, JSON.parse(entry.snapshot));
+        state.bumpDoc();
+        state.requestRender();
+        NetworkManager.queueOperation({ t: 'full', snapshot: entry.snapshot });
+        state.undoStack.push({ t: 'restore', snapshot: currentSnapshot });
+        break;
     }
   }
 }
-function doRedo() {
-  const e = redoStack.pop(); if (!e) return
-  switch (e.t) {
-    case 'add': addObject(e.obj, true); break
-    case 'update': updateObject(e.id, e.after, true); break
-    case 'restore': {
-      const snap = JSON.stringify(doc)
-      Object.assign(doc, JSON.parse(e.snapshot))
-      bumpDoc(); requestRender()
-      queueOp({ t: 'full', snapshot: e.snapshot })
-      undoStack.push({ t: 'restore', snapshot: snap })
-      break
+
+// ============================================================================
+// INPUT HANDLING
+// ============================================================================
+
+class InputHandler {
+  static init() {
+    this.setupKeyboardHandlers();
+    this.setupMouseHandlers();
+    this.setupTouchHandlers();
+    this.setupPanningHandlers();
+  }
+
+  static setupKeyboardHandlers() {
+    window.addEventListener('keydown', (e) => {
+      const key = e.key.toLowerCase();
+
+      // Undo/Redo
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && key === 'z') {
+        e.preventDefault();
+        HistoryManager.undo();
+      } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && key === 'z') {
+        e.preventDefault();
+        HistoryManager.redo();
+      }
+
+      // Tool shortcuts
+      else if (!e.ctrlKey && !e.metaKey) {
+        switch (key) {
+          case 'p': DrawingTools.selectTool('pen'); break;
+          case 'e': DrawingTools.selectTool('eraser'); break;
+          case 'l': DrawingTools.selectTool('line'); break;
+          case 'r': DrawingTools.selectTool('rect'); break;
+          case 'o': DrawingTools.selectTool('ellipse'); break;
+          case 'd': DrawingTools.selectTool('diamond'); break;
+          case 't': DrawingTools.selectTool('text'); break;
+        }
+      }
+
+      // Panning
+      if (e.code === 'Space') {
+        state.spaceHeld = true;
+        e.preventDefault();
+      }
+    });
+
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'Space') {
+        state.spaceHeld = false;
+      }
+    });
+  }
+
+  static setupMouseHandlers() {
+    ui.canvas.addEventListener('mousedown', (e) => this.handleMouseDown(e));
+    ui.canvas.addEventListener('mousemove', (e) => this.handleMouseMove(e));
+    ui.canvas.addEventListener('mouseup', (e) => this.handleMouseUp(e));
+    ui.canvas.addEventListener('dblclick', (e) => this.handleDoubleClick(e));
+    ui.canvas.addEventListener('mouseleave', () => this.handleMouseLeave());
+  }
+
+  static setupTouchHandlers() {
+    ui.canvas.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
+    ui.canvas.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });
+    ui.canvas.addEventListener('touchend', (e) => this.handleTouchEnd(e));
+  }
+
+  static setupPanningHandlers() {
+    window.addEventListener('mousemove', (e) => this.handlePanMove(e));
+    window.addEventListener('mouseup', () => this.handlePanEnd());
+  }
+
+  static handleMouseDown(event) {
+    const coords = CoordinateUtils.toCanvas(event);
+
+    // Check for panning
+    if (this.shouldStartPanning(event)) {
+      this.startPanning(event);
+      return;
+    }
+
+    // Check for object dragging
+    if (event.shiftKey) {
+      const objectId = DocumentManager.findTopObjectAt(coords.x, coords.y);
+      if (objectId) {
+        this.startDragging(objectId, coords);
+        return;
+      }
+    }
+
+    // Start drawing
+    this.startDrawing(coords);
+  }
+
+  static handleMouseMove(event) {
+    const coords = CoordinateUtils.toCanvas(event);
+
+    if (state.drawing && state.activeId) {
+      this.continuDrawing(coords);
+    } else if (state.isDragging && state.activeId) {
+      this.continueDragging(coords);
+    } else {
+      this.updateHover(coords, event.shiftKey);
+    }
+  }
+
+  static handleMouseUp(event) {
+    if (state.isDragging) {
+      state.isDragging = false;
+      state.activeId = null;
+      return;
+    }
+
+    if (!state.drawing) return;
+
+    state.drawing = false;
+    if (state.tool === 'pen' || state.tool === 'eraser') {
+      DrawingTools.finishStroke(state.activeId);
+    }
+
+    state.activeId = null;
+  }
+
+  static handleDoubleClick(event) {
+    const coords = CoordinateUtils.toCanvas(event);
+    const objectId = DocumentManager.findTopObjectAt(coords.x, coords.y);
+
+    if (objectId) {
+      const obj = state.doc.objects[objectId];
+      if (obj && obj.type === 'text') {
+        TextEditor.open(obj.x, obj.y, obj.text || '');
+      }
+    }
+  }
+
+  static handleMouseLeave() {
+    state.isPanning = false;
+  }
+
+  static shouldStartPanning(event) {
+    return (state.spaceHeld && event.button === 0) ||
+        event.button === 1 ||
+        state.tool === 'hand';
+  }
+
+  static startPanning(event) {
+    state.isPanning = true;
+    const rect = ui.canvas.getBoundingClientRect();
+    state.lastCX = event.clientX - rect.left;
+    state.lastCY = event.clientY - rect.top;
+    event.preventDefault();
+  }
+
+  static startDragging(objectId, coords) {
+    state.activeId = objectId;
+    state.isDragging = true;
+    const obj = state.doc.objects[objectId];
+    const bounds = GeometryUtils.getBounds(obj);
+    state.dragOffset = {
+      x: coords.x - bounds.x,
+      y: coords.y - bounds.y
+    };
+  }
+
+  static startDrawing(coords) {
+    state.drawing = true;
+    state.start = coords;
+    const id = state.generateRandomId();
+
+    switch (state.tool) {
+      case 'pen':
+      case 'eraser':
+        DrawingTools.beginFreeDrawing(id, state.tool, coords.x, coords.y);
+        break;
+      case 'line':
+      case 'rect':
+      case 'ellipse':
+      case 'diamond':
+        DrawingTools.beginShape(id, state.tool, coords.x, coords.y);
+        break;
+      case 'text':
+        TextEditor.open(coords.x, coords.y);
+        break;
+    }
+  }
+
+  static continuDrawing(coords) {
+    if (state.tool === 'pen' || state.tool === 'eraser') {
+      DrawingTools.addPoint(state.activeId, coords.x, coords.y);
+    } else if (['line', 'rect', 'ellipse', 'diamond'].includes(state.tool)) {
+      DrawingTools.resizeShape(state.activeId, coords.x, coords.y);
+    }
+  }
+
+  static continueDragging(coords) {
+    const obj = state.doc.objects[state.activeId];
+    if (!obj) return;
+
+    const newX = coords.x - state.dragOffset.x;
+    const newY = coords.y - state.dragOffset.y;
+
+    if (obj.points) {
+      // Move path points
+      const deltaX = newX - obj.x;
+      const deltaY = newY - obj.y;
+      obj.points = obj.points.map(point => ({
+        x: point.x + deltaX,
+        y: point.y + deltaY
+      }));
+    }
+
+    obj.x = newX;
+    obj.y = newY;
+    obj.rev++;
+    state.bumpDoc();
+    state.requestRender();
+
+    NetworkManager.queueOperation({
+      t: 'move',
+      id: obj.id,
+      patch: { x: obj.x, y: obj.y, points: obj.points || null, rev: obj.rev }
+    });
+  }
+
+  static updateHover(coords, isShiftPressed) {
+    const objectId = DocumentManager.findTopObjectAt(coords.x, coords.y);
+    state.hoverId = objectId;
+    ui.canvas.style.cursor = (objectId && isShiftPressed) ? 'move' : 'crosshair';
+    state.requestRender();
+  }
+
+  static handlePanMove(event) {
+    if (!state.isPanning) return;
+
+    const rect = ui.canvas.getBoundingClientRect();
+    const clientX = event.clientX - rect.left;
+    const clientY = event.clientY - rect.top;
+
+    const deltaX = clientX - state.lastCX;
+    const deltaY = clientY - state.lastCY;
+
+    state.panX += deltaX;
+    state.panY += deltaY;
+    state.lastCX = clientX;
+    state.lastCY = clientY;
+
+    CanvasManager.clampPan();
+    state.requestRender();
+
+    CursorManager.handleCanvasTransform();
+  }
+
+  static handlePanEnd() {
+    state.isPanning = false;
+  }
+
+  // Touch handlers
+  static handleTouchStart(event) {
+    if (event.touches.length === 2) {
+      state.touchPanning = true;
+      state.lastTouchMid = this.getTouchMidpoint(event.touches[0], event.touches[1]);
+      event.preventDefault();
+    }
+  }
+
+  static handleTouchMove(event) {
+    if (!state.touchPanning || event.touches.length !== 2) return;
+
+    const midpoint = this.getTouchMidpoint(event.touches[0], event.touches[1]);
+    state.panX += (midpoint.x - state.lastTouchMid.x);
+    state.panY += (midpoint.y - state.lastTouchMid.y);
+    state.lastTouchMid = midpoint;
+
+    CanvasManager.clampPan();
+    state.requestRender();
+    event.preventDefault();
+  }
+
+  static handleTouchEnd(event) {
+    state.touchPanning = false;
+  }
+
+  static getTouchMidpoint(touch1, touch2) {
+    const rect = ui.canvas.getBoundingClientRect();
+    return {
+      x: ((touch1.clientX + touch2.clientX) / 2) - rect.left,
+      y: ((touch1.clientY + touch2.clientY) / 2) - rect.top
+    };
+  }
+}
+
+// ============================================================================
+// CURSOR TRACKING - CORRECTED VERSION
+// ============================================================================
+
+class CursorManager {
+  static init() {
+    this.cursors = new Map();
+    this.lastBroadcast = 0;
+    this.broadcastThrottle = 16;
+    this.animationFrame = null;
+
+    // Smoothing configuration
+    this.smoothingConfig = {
+      easingFactor: 0.15, // Lower = smoother, higher = more responsive
+      velocityDecay: 0.8,  // Velocity decay for natural movement
+      minDistance: 1,      // Minimum distance to trigger movement
+      maxVelocity: 50      // Maximum velocity per frame
+    };
+
+    document.addEventListener("mousemove", (event) => {
+      this.updateLocalCursor(event);
+    });
+
+    // Start smooth animation loop for peer cursors
+    this.startAnimationLoop();
+
+    // Clean up stale cursors periodically
+    setInterval(() => {
+      this.cleanupStaleCursors();
+    }, 5000);
+  }
+
+  static updateLocalCursor(event) {
+    const now = Date.now();
+
+    // Update local cursor position immediately (no interpolation needed)
+    if (ui.mouse) {
+      ui.mouse.style.left = `${event.clientX + 20}px`;
+      ui.mouse.style.top = `${event.clientY + 20}px`;
+      ui.mouse.style.transform = "translate(-50%, -50%)";
+      ui.mouse.textContent = state.peerName || 'You';
+    }
+
+    // Throttle network broadcasts
+    if (now - this.lastBroadcast < this.broadcastThrottle) {
+      return;
+    }
+    this.lastBroadcast = now;
+
+    // Convert to world coordinates for broadcasting
+    const worldCoords = this.screenToWorld(event.clientX, event.clientY);
+
+    // Broadcast world coordinates instead of canvas coordinates
+    NetworkManager.broadcast({
+      t: 'cursor',
+      from: {
+        name: state.peerName || `Peer-${state.localPeerId}`,
+        id: state.localPeerId
+      },
+      worldX: worldCoords.x,
+      worldY: worldCoords.y,
+      timestamp: now
+    });
+  }
+
+  static updatePeerCursor(peerId, peerName, cursorInfo) {
+    if (peerId === state.localPeerId) {
+      return; // Don't track our own cursor
+    }
+
+    const now = Date.now();
+
+    // Convert world coordinates to screen coordinates
+    const screenCoords = this.worldToScreen(cursorInfo.worldX, cursorInfo.worldY);
+
+    let cursorData = this.cursors.get(peerId);
+
+    if (!cursorData) {
+      // Create new cursor data with element
+      cursorData = {
+        name: peerName,
+        element: this.createPeerCursorElement(peerId, peerName),
+        // Current position (for smooth interpolation)
+        currentX: screenCoords.x,
+        currentY: screenCoords.y,
+        // Target position (where we want to move to)
+        targetX: screenCoords.x,
+        targetY: screenCoords.y,
+        // Velocity for smoother movement
+        velocityX: 0,
+        velocityY: 0,
+        // World coordinates (for recalculation on zoom/pan)
+        worldX: cursorInfo.worldX,
+        worldY: cursorInfo.worldY,
+        lastUpdate: now,
+        visible: true,
+        lastFrameTime: now
+      };
+      this.cursors.set(peerId, cursorData);
+    } else {
+      // Calculate new target position
+      const newTargetX = screenCoords.x;
+      const newTargetY = screenCoords.y;
+
+      // Update cursor data
+      cursorData.name = peerName;
+      cursorData.targetX = newTargetX;
+      cursorData.targetY = newTargetY;
+      cursorData.worldX = cursorInfo.worldX;
+      cursorData.worldY = cursorInfo.worldY;
+      cursorData.lastUpdate = now;
+      cursorData.visible = true;
+    }
+
+    // Update cursor name if changed
+    if (cursorData.element) {
+      cursorData.element.textContent = peerName || `Peer-${peerId}`;
+    }
+  }
+
+  static startAnimationLoop() {
+    const animate = (timestamp) => {
+      this.updateAllCursors(timestamp);
+      this.animationFrame = requestAnimationFrame(animate);
+    };
+    this.animationFrame = requestAnimationFrame(animate);
+  }
+
+  static updateAllCursors(timestamp) {
+    for (const [peerId, cursorData] of this.cursors.entries()) {
+      if (!cursorData.element || !cursorData.visible) continue;
+
+      // Calculate delta time for frame-rate independent smoothing
+      const deltaTime = Math.min(timestamp - cursorData.lastFrameTime, 50); // Cap at 50ms
+      cursorData.lastFrameTime = timestamp;
+
+      // Calculate distance to target
+      const deltaX = cursorData.targetX - cursorData.currentX;
+      const deltaY = cursorData.targetY - cursorData.currentY;
+      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+      // Skip if we're close enough
+      if (distance < this.smoothingConfig.minDistance) {
+        continue;
+      }
+
+      // Calculate desired velocity with easing
+      const easingFactor = this.smoothingConfig.easingFactor * (deltaTime / 16); // Normalize to 60fps
+      const desiredVelX = deltaX * easingFactor;
+      const desiredVelY = deltaY * easingFactor;
+
+      // Apply velocity smoothing
+      cursorData.velocityX = cursorData.velocityX * this.smoothingConfig.velocityDecay +
+          desiredVelX * (1 - this.smoothingConfig.velocityDecay);
+      cursorData.velocityY = cursorData.velocityY * this.smoothingConfig.velocityDecay +
+          desiredVelY * (1 - this.smoothingConfig.velocityDecay);
+
+      // Clamp velocity
+      const velocity = Math.sqrt(cursorData.velocityX ** 2 + cursorData.velocityY ** 2);
+      if (velocity > this.smoothingConfig.maxVelocity) {
+        const scale = this.smoothingConfig.maxVelocity / velocity;
+        cursorData.velocityX *= scale;
+        cursorData.velocityY *= scale;
+      }
+
+      // Update position
+      cursorData.currentX += cursorData.velocityX;
+      cursorData.currentY += cursorData.velocityY;
+
+      // Check if cursor is within viewport bounds with buffer
+      const buffer = 100;
+      const inBounds = cursorData.currentX >= -buffer &&
+          cursorData.currentX <= window.innerWidth + buffer &&
+          cursorData.currentY >= -buffer &&
+          cursorData.currentY <= window.innerHeight + buffer;
+
+      if (inBounds) {
+        // Update element position with smooth values
+        cursorData.element.style.left = `${Math.round(cursorData.currentX)}px`;
+        cursorData.element.style.top = `${Math.round(cursorData.currentY)}px`;
+        cursorData.element.style.opacity = '1';
+        cursorData.element.style.visibility = 'visible';
+      } else {
+        // Fade out off-screen cursors
+        cursorData.element.style.opacity = '0.3';
+      }
+    }
+  }
+
+  // Helper method to convert screen coordinates to world coordinates
+  static screenToWorld(screenX, screenY) {
+    const rect = ui.canvas.getBoundingClientRect();
+    const canvasX = screenX - rect.left;
+    const canvasY = screenY - rect.top;
+
+    return {
+      x: (canvasX - state.panX) / state.zoom,
+      y: (canvasY - state.panY) / state.zoom
+    };
+  }
+
+  // Helper method to convert world coordinates to screen coordinates
+  static worldToScreen(worldX, worldY) {
+    const rect = ui.canvas.getBoundingClientRect();
+    const canvasX = worldX * state.zoom + state.panX;
+    const canvasY = worldY * state.zoom + state.panY;
+
+    return {
+      x: canvasX + rect.left,
+      y: canvasY + rect.top
+    };
+  }
+
+  static createPeerCursorElement(peerId, peerName) {
+    const { bg, text } = getRandomColorPair();
+    const element = document.createElement('div');
+    element.className = 'peer-cursor';
+    element.dataset.peerId = peerId;
+
+    // Enhanced styling for smoother appearance
+    element.style.cssText = `
+            position: fixed;
+            left: 0px;
+            top: 0px;
+            width: fit-content;
+            height: fit-content;
+            background: ${bg};
+            border-radius: 4px 50px 50px 50px;
+            pointer-events: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            z-index: 9999;
+            color: ${text};
+            padding: 4px 8px;
+            font-size: 12px;
+            font-weight: 500;
+            white-space: nowrap;
+            opacity: 1;
+            visibility: visible;
+            transform: translate(-50%, -100%);
+            will-change: transform, left, top;
+            backface-visibility: hidden;
+            transition: opacity 0 ease-out;
+        `;
+
+    element.textContent = peerName || `Peer-${peerId}`;
+    document.body.appendChild(element);
+    return element;
+  }
+
+  static updatePeerName(peerId, name) {
+    state.peerNames.set(peerId, name);
+    const cursorData = this.cursors.get(peerId);
+    if (cursorData) {
+      cursorData.name = name;
+      if (cursorData.element) {
+        cursorData.element.textContent = name || `Peer-${peerId}`;
+      }
+    }
+  }
+
+  static cleanupStaleCursors() {
+    const now = Date.now();
+    const staleThreshold = 10000; // 10 seconds
+
+    for (const [peerId, cursorData] of this.cursors.entries()) {
+      if (now - cursorData.lastUpdate > staleThreshold) {
+        this.removePeerCursor(peerId);
+      }
+    }
+  }
+
+  static removePeerCursor(peerId) {
+    const cursorData = this.cursors.get(peerId);
+    if (cursorData && cursorData.element) {
+      // Fade out before removing
+      cursorData.element.style.transition = 'opacity 200ms ease-out';
+      cursorData.element.style.opacity = '0';
+      setTimeout(() => {
+        if (cursorData.element && cursorData.element.parentNode) {
+          cursorData.element.parentNode.removeChild(cursorData.element);
+        }
+      }, 200);
+    }
+
+    this.cursors.delete(peerId);
+    state.peerCursors.delete(peerId);
+  }
+
+  static handleWindowResize() {
+    // Recalculate all cursor positions when window resizes
+    for (const [peerId, cursorData] of this.cursors.entries()) {
+      if (cursorData.visible && cursorData.worldX !== undefined && cursorData.worldY !== undefined) {
+        // Recalculate screen position from world coordinates
+        const newScreenCoords = this.worldToScreen(cursorData.worldX, cursorData.worldY);
+        cursorData.targetX = newScreenCoords.x;
+        cursorData.targetY = newScreenCoords.y;
+        cursorData.currentX = newScreenCoords.x;
+        cursorData.currentY = newScreenCoords.y;
+      }
+    }
+  }
+
+  // Called when canvas pan/zoom changes
+  static handleCanvasTransform() {
+    // Update all cursor positions based on new transform
+    for (const [peerId, cursorData] of this.cursors.entries()) {
+      if (cursorData.visible && cursorData.worldX !== undefined && cursorData.worldY !== undefined) {
+        const newScreenCoords = this.worldToScreen(cursorData.worldX, cursorData.worldY);
+        cursorData.targetX = newScreenCoords.x;
+        cursorData.targetY = newScreenCoords.y;
+      }
+    }
+  }
+
+  static renderPeerCursors() {
+    // This method is now mainly for compatibility
+    // Most rendering is handled by the animation loop
+  }
+
+  static destroy() {
+    if (this.animationFrame) {
+      cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+    }
+
+    // Clean up all cursor elements
+    for (const [peerId, cursorData] of this.cursors.entries()) {
+      if (cursorData.element && cursorData.element.parentNode) {
+        cursorData.element.parentNode.removeChild(cursorData.element);
+      }
+    }
+    this.cursors.clear();
+  }
+}
+
+// ============================================================================
+// USER INTERFACE
+// ============================================================================
+
+class UIManager {
+  static init() {
+    this.setupUserNameHandlers();
+    this.setupToolHandlers();
+    this.setupSessionHandlers();
+    this.updateLocalPeerDisplay();
+  }
+
+  static setupUserNameHandlers() {
+    ui.localPeerName.addEventListener('click', (e) => {
+      e.preventDefault();
+      ui.namePopup.classList.toggle('hidden');
+    });
+
+    ui.peerNameBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      const username = ui.peerNameInput.value.trim();
+      if (username.length > 0) {
+        this.updateUserName(username);
+      }
+    });
+  }
+
+  static setupToolHandlers() {
+    ui.tools.addEventListener('click', (e) => {
+      const button = e.target;
+      if (button && button.dataset.tool) {
+        DrawingTools.selectTool(button.dataset.tool);
+      }
+    });
+
+    ui.color.addEventListener('input', () => {
+      state.strokeColor = ui.color.value;
+    });
+
+    ui.size.addEventListener('input', () => {
+      state.strokeSize = parseInt(ui.size.value, 10);
+    });
+
+    ui.undo.addEventListener('click', () => HistoryManager.undo());
+    ui.redo.addEventListener('click', () => HistoryManager.redo());
+    ui.clear.addEventListener('click', () => DocumentManager.clearAll(true));
+    ui.save.addEventListener('click', () => this.saveCanvasAsPNG());
+  }
+
+  static setupSessionHandlers() {
+    ui.createBtn.addEventListener('click', async () => {
+      const topic = crypto.randomBytes(32).toString('hex');
+      SessionManager.startSession(topic);
+    });
+
+    ui.joinBtn.addEventListener('click', async () => {
+      const topic = ui.joinInput.value.trim();
+      if (!topic) {
+        alert('Enter a topic key');
+        return;
+      }
+      SessionManager.startSession(topic);
+    });
+  }
+
+  static updateUserName(username) {
+    CursorManager.updatePeerName(state.localPeerId, username);
+    state.peerName = username;
+    ui.localPeerName.innerHTML = state.peerName;
+    ui.namePopup.classList.add('hidden');
+
+    // Update the local mouse follower text
+    if (ui.mouse) {
+      ui.mouse.textContent = username || 'You';
+    }
+
+    console.log('Local Peer ID set to', state.localPeerId, 'Username:', username);
+  }
+
+  static updateLocalPeerDisplay() {
+    ui.localPeerName.innerHTML = state.localPeerId;
+  }
+
+  static updatePeerCount(count) {
+    ui.peersCount.textContent = String(count + 1);
+  }
+
+  static saveCanvasAsPNG() {
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = ui.canvas.width;
+    tempCanvas.height = ui.canvas.height;
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.drawImage(ui.canvas, 0, 0);
+
+    const dataUrl = tempCanvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = `whiteboard-${Date.now()}.png`;
+    link.click();
+    URL.revokeObjectURL(dataUrl);
+  }
+
+  static showSetup() {
+    ui.setup.classList.remove('hidden');
+    ui.loading.classList.add('hidden');
+    ui.toolbar.classList.add('hidden');
+    ui.boardWrap.classList.add('hidden');
+  }
+
+  static showLoading() {
+    ui.setup.classList.add('hidden');
+    ui.loading.classList.remove('hidden');
+    ui.toolbar.classList.add('hidden');
+    ui.boardWrap.classList.add('hidden');
+  }
+
+  static showWorkspace() {
+    ui.setup.classList.add('hidden');
+    ui.loading.classList.add('hidden');
+    ui.toolbar.classList.remove('hidden');
+    ui.boardWrap.classList.remove('hidden');
+  }
+}
+
+// ============================================================================
+// SESSION MANAGEMENT
+// ============================================================================
+
+class SessionManager {
+  static async startSession(topicHex) {
+    if (state.joined) return;
+
+    state.joined = true;
+    state.topicKey = topicHex;
+    UIManager.showLoading();
+    ui.topicOut.textContent = topicHex;
+
+    try {
+      await NetworkManager.initSwarm(topicHex);
+      UIManager.showWorkspace();
+      CanvasManager.resizeCanvas();
+    } catch (error) {
+      console.error('Failed to start networking:', error);
+      alert('Failed to start networking');
+      window.location.reload();
     }
   }
 }
 
-// ---------- Selection & Move (Shift + drag) ----------
-function findTopAt(x, y) {
-  for (let i = doc.order.length - 1; i >= 0; i--) {
-    const id = doc.order[i]
-    const o = doc.objects[id]
-    if (o && pointIn(o, x, y)) return o.id
+// ============================================================================
+// NETWORK MANAGEMENT
+// ============================================================================
+
+class NetworkManager {
+  static async initSwarm(topicHex) {
+    state.swarm = new Hyperswarm();
+    const topic = b4a.from(topicHex, 'hex');
+
+    state.swarm.on('connection', (socket) => {
+      this.setupConnection(socket);
+    });
+
+    await state.swarm.join(topic, { server: true, client: true });
+    await state.swarm.flush(); // Ensure DHT announce before proceeding
   }
-  return null
+
+  static setupConnection(socket) {
+    const connection = {
+      socket: socket,
+      closed: false
+    };
+
+    state.connections.add(connection);
+    state.peerCount = state.connections.size;
+    UIManager.updatePeerCount(state.peerCount);
+
+    // Send initial hello with current document
+    this.safeSend(connection, {
+      t: 'hello',
+      from: state.localPeerId,
+      doc: this.serializeDocument()
+    });
+
+    socket.on('data', (buffer) => {
+      const message = this.decode(buffer);
+      if (message) {
+        this.handleRemoteMessage(message);
+      }
+    });
+
+    socket.once('close', () => {
+      connection.closed = true;
+      state.connections.delete(connection);
+      state.peerCount = state.connections.size;
+      UIManager.updatePeerCount(state.peerCount);
+    });
+
+    socket.once('error', () => {
+      connection.closed = true;
+      state.connections.delete(connection);
+      state.peerCount = state.connections.size;
+      UIManager.updatePeerCount(state.peerCount);
+    });
+  }
+
+  static queueOperation(operation) {
+    state.outbox.push(operation);
+    this.flushOutbox();
+  }
+
+  static flushOutbox() {
+    if (state.flushing) return;
+    state.flushing = true;
+
+    while (state.outbox.length > 0) {
+      const operation = state.outbox.shift();
+      this.broadcast(operation);
+    }
+
+    state.flushing = false;
+  }
+
+  static broadcast(operation) {
+    const payload = this.encode(operation);
+    for (const connection of state.connections) {
+      if (connection.closed) continue;
+      try {
+        connection.socket.write(payload);
+      } catch (error) {
+        // Connection dropped, ignore error
+      }
+    }
+  }
+
+  static safeSend(connection, object) {
+    try {
+      connection.socket.write(this.encode(object));
+    } catch (error) {
+      // Connection dropped, ignore error
+    }
+  }
+
+  static serializeDocument() {
+    return {
+      version: state.doc.version,
+      order: state.doc.order,
+      objects: state.doc.objects
+    };
+  }
+
+  static applySnapshot(snapshot) {
+    if (!snapshot || (snapshot.version ?? -1) < (state.doc.version ?? -1)) {
+      return;
+    }
+
+    state.doc.order = [...snapshot.order];
+    state.doc.objects = {};
+    for (const id of state.doc.order) {
+      state.doc.objects[id] = snapshot.objects[id];
+    }
+
+    state.doc.version = snapshot.version;
+    state.requestRender();
+  }
+
+  static handleRemoteMessage(message) {
+    switch (message.t) {
+      case 'hello':
+        this.applySnapshot(message.doc);
+        // Reply with our version if we're ahead
+        if (state.doc.version > (message.doc?.version ?? -1)) {
+          this.broadcast({ t: 'full', snapshot: this.serializeDocument() });
+        }
+        break;
+
+      case 'full':
+        this.applySnapshot(message.snapshot);
+        break;
+
+      case 'add':
+        this.handleAddMessage(message);
+        break;
+
+      case 'update':
+        this.handleUpdateMessage(message);
+        break;
+
+      case 'patch':
+        this.handlePatchMessage(message);
+        break;
+
+      case 'touch':
+        this.handleTouchMessage(message);
+        break;
+
+      case 'move':
+        this.handleMoveMessage(message);
+        break;
+
+      case 'delete':
+        this.handleDeleteMessage(message);
+        break;
+
+      case 'clear':
+        DocumentManager.clearAll(false);
+        break;
+
+      case 'cursor':
+        this.handleCursorMessage(message);
+        break;
+    }
+  }
+
+  static handleAddMessage(message) {
+    const obj = message.obj;
+    if (state.doc.objects[obj.id]) return;
+
+    state.doc.objects[obj.id] = obj;
+    state.doc.order.push(obj.id);
+    state.bumpDoc();
+    state.requestRender();
+  }
+
+  static handleUpdateMessage(message) {
+    const obj = state.doc.objects[message.id];
+    if (!obj) return;
+
+    // Last-writer-wins by revision number
+    if ((message.patch.rev ?? 0) < (obj.rev ?? 0)) return;
+
+    Object.assign(obj, message.patch);
+    state.bumpDoc();
+    state.requestRender();
+  }
+
+  static handlePatchMessage(message) {
+    const obj = state.doc.objects[message.id];
+    if (!obj || !obj.points) return;
+
+    obj.points.push(message.push);
+    obj.rev++;
+    state.bumpDoc();
+    state.requestRender();
+  }
+
+  static handleTouchMessage(message) {
+    const obj = state.doc.objects[message.id];
+    if (obj) {
+      obj.rev++;
+      state.bumpDoc();
+      state.requestRender();
+    }
+  }
+
+  static handleMoveMessage(message) {
+    const obj = state.doc.objects[message.id];
+    if (!obj) return;
+
+    if ((message.patch.rev ?? 0) < (obj.rev ?? 0)) return;
+
+    if (message.patch.points) {
+      obj.points = message.patch.points;
+    }
+
+    obj.x = message.patch.x;
+    obj.y = message.patch.y;
+    obj.rev = message.patch.rev;
+    state.bumpDoc();
+    state.requestRender();
+  }
+
+  static handleDeleteMessage(message) {
+    const id = message.id;
+    if (!state.doc.objects[id]) return;
+
+    delete state.doc.objects[id];
+    state.doc.order = state.doc.order.filter(objId => objId !== id);
+    state.bumpDoc();
+    state.requestRender();
+  }
+
+  static handleCursorMessage(message) {
+    // Ignore our own cursor updates
+    if (message.from.id === state.localPeerId ||
+        (message.from.name === state.peerName && message.from.name !== '')) {
+      return;
+    }
+
+    // Validate message structure - now expects worldX/worldY instead of canvasX/canvasY
+    if (!message.from || !message.from.id ||
+        typeof message.worldX !== 'number' ||
+        typeof message.worldY !== 'number') {
+      return;
+    }
+
+    // Store cursor data for potential recalculations
+    state.peerCursors.set(message.from.id, {
+      name: message.from.name,
+      cursor: {
+        worldX: message.worldX,
+        worldY: message.worldY,
+        timestamp: message.timestamp || Date.now()
+      }
+    });
+
+    // Update smooth cursor system with world coordinates
+    CursorManager.updatePeerCursor(
+        message.from.id,
+        message.from.name || `Peer-${message.from.id}`,
+        {
+          worldX: message.worldX,
+          worldY: message.worldY,
+          timestamp: message.timestamp || Date.now()
+        }
+    );
+  }
+
+
+  static encode(object) {
+    return b4a.from(JSON.stringify(object));
+  }
+
+  static decode(buffer) {
+    try {
+      return JSON.parse(b4a.toString(buffer));
+    } catch (error) {
+      return null;
+    }
+  }
 }
 
-ui.canvas.addEventListener('mousemove', (e) => {
-  const { x, y } = toCanvas(e)
-  if (drawing && activeId) {
-    if (tool === 'pen' || tool === 'eraser') addPoint(activeId, x, y)
-    else if (tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'diamond') {
-      resizeShape(activeId, x, y)
-    }
-  } else if (isDragging && activeId) {
-    const o = doc.objects[activeId]; if (!o) return
-    // apply drag
-    const nx = x - dragOffset.x
-    const ny = y - dragOffset.y
-    const before = { x: o.x, y: o.y }
-    // for pen/eraser move all points; for shapes update x/y; for text x/y
-    if (o.points) {
-      const dx = nx - o.x, dy = ny - o.y
-      o.points = o.points.map(p => ({ x: p.x + dx, y: p.y + dy }))
-    }
-    o.x = nx; o.y = ny; o.rev++; bumpDoc()
-    requestRender()
-    queueOp({ t: 'move', id: o.id, patch: { x: o.x, y: o.y, points: o.points || null, rev: o.rev } })
-    dragOffset.x = x - o.x
-    dragOffset.y = y - o.y
-  } else {
-    // hover detection
-    const id = findTopAt(x, y)
-    hoverId = id
-    ui.canvas.style.cursor = (id && e.shiftKey) ? 'move' : 'crosshair'
-    requestRender()
+// ============================================================================
+// APPLICATION INITIALIZATION
+// ============================================================================
+
+class WhiteboardApp {
+  static init() {
+    console.log('Initializing P2P Collaborative Whiteboard...');
+    console.log('Local Peer ID:', state.localPeerId);
+
+    // Initialize all managers
+    CanvasManager.init();
+    InputHandler.init();
+    CursorManager.init();
+    UIManager.init();
+
+    // Set initial tool and UI state
+    DrawingTools.selectTool('pen');
+    state.strokeColor = ui.color.value;
+    state.strokeSize = parseInt(ui.size.value, 10);
+
+    // Show setup screen
+    UIManager.showSetup();
+
+    console.log('Whiteboard application initialized successfully');
   }
-})
+}
 
-ui.canvas.addEventListener('mousedown', (e) => {
-  const { x, y } = toCanvas(e)
-  if (e.shiftKey) {
-    const id = findTopAt(x, y)
-    if (id) {
-      activeId = id
-      isDragging = true
-      const o = doc.objects[id]
-      const b = bounds(o)
-      dragOffset.x = x - b.x
-      dragOffset.y = y - b.y
-      return
-    }
-  }
-  // normal tools
-  drawing = true
-  start = { x, y }
-  const id = randomId()
-  if (tool === 'pen' || tool === 'eraser') beginFree(id, tool, x, y)
-  else if (tool === 'line' || tool === 'rect' || tool === 'ellipse' || tool === 'diamond') beginShape(id, tool, x, y)
-  else if (tool === 'text') openTextEditor(x, y)
-})
+// ============================================================================
+// APPLICATION BOOTSTRAP
+// ============================================================================
 
-window.addEventListener('mouseup', () => {
-  if (isDragging) { isDragging = false; activeId = null; return }
-  if (!drawing) return
-  drawing = false
-  if (tool === 'pen' || tool === 'eraser') finishStroke(activeId)
-  activeId = null
-})
-
-ui.canvas.addEventListener('dblclick', (e) => {
-  // quick-edit text on double click if any
-  const { x, y } = toCanvas(e)
-  const id = findTopAt(x, y)
-  if (!id) return
-  const o = doc.objects[id]
-  if (o.type === 'text') {
-    openTextEditor(o.x, o.y, o.text || '')
-    // preload existing text
-    if (textEl) textEl.textContent = o.text || ''
-  }
-})
-
-// ---------- Keyboard ----------
-window.addEventListener('keydown', (e) => {
-  const k = e.key.toLowerCase();
-
-  if ((e.metaKey || e.ctrlKey) && !e.shiftKey && k === 'z') {
-    e.preventDefault();
-    doUndo();
-  } else if ((e.metaKey || e.ctrlKey) && e.shiftKey && k === 'z') {
-    e.preventDefault();
-    doRedo();
-  } else if (k === 'p' && e.shiftKey) {
-    selectTool('specialPen');
-  } else if (k === 'p' && e.shiftKey) {
-    selectTool('pen');
-  }
-  else if (k === 'e' && e.shiftKey) selectTool('specialEraser');
+document.addEventListener('DOMContentLoaded', () => {
+  WhiteboardApp.init();
 });
 
-
-// ---------- UI wiring ----------
-ui.tools.addEventListener('click', (e) => {
-  const b = (e.target)
-  if (b && b.dataset.tool) selectTool(b.dataset.tool)
-})
-ui.color.addEventListener('input', (e) => {
-  strokeColor = ui.color.value
-})
-ui.size.addEventListener('input', () => {
-  strokeSize = parseInt(ui.size.value, 10)
-})
-ui.undo.addEventListener('click', () => doUndo())
-ui.redo.addEventListener('click', () => doRedo())
-ui.clear.addEventListener('click', () => deleteAll(true))
-ui.save.addEventListener('click', () => savePNG())
-
-// ---------- Create / Join (stable) ----------
-let swarm = null
-let topicKey = null
-let joined = false
-const conns = new Set()
-let peerCount = 0
-
-ui.createBtn.addEventListener('click', async () => {
-  startSession(hex(crypto.randomBytes(32)))
-})
-ui.joinBtn.addEventListener('click', async () => {
-  const t = ui.joinInput.value.trim()
-  if (!t) return alert('Enter a topic key')
-  startSession(t)
-})
-
-function startSession(topicHex) {
-  if (joined) return
-  joined = true
-  ui.setup.classList.add('hidden')
-  ui.loading.classList.remove('hidden')
-  topicKey = topicHex
-  ui.topicOut.textContent = topicHex // show in header
-  initSwarm(topicHex).then(() => {
-    ui.loading.classList.add('hidden')
-    ui.toolbar.classList.remove('hidden')
-    ui.boardWrap.classList.remove('hidden')
-    resizeCanvas()
-  }).catch(err => {
-    console.error(err)
-    alert('Failed to start networking')
-    window.location.reload()
-  })
+// Export for potential external use
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    WhiteboardApp,
+    state,
+    CanvasManager,
+    DrawingTools,
+    DocumentManager,
+    NetworkManager,
+    UIManager
+  };
 }
-
-// ---------- Networking ----------
-async function initSwarm(topicHex) {
-  swarm = new Hyperswarm()
-  const topic = b4a.from(topicHex, 'hex')
-
-  swarm.on('connection', (socket) => {
-    setupConn(socket)
-  })
-
-  await swarm.join(topic, { server: true, client: true })
-  await swarm.flush() // ensure DHT announce before proceeding
-}
-
-function setupConn(socket) {
-  // socket.setKeepAlive(10_000)
-  // socket.setNoDelay(true)
-
-  const conn = {
-    sock: socket,
-    inflight: 0,
-    closed: false
-  }
-  conns.add(conn); peerCount = conns.size; updatePeerCount()
-
-  // send a hello with snapshot throttle-safe
-  safeSend(conn, { t: 'hello', from: localPeerId, doc: serializeDoc() })
-
-  socket.on('data', (buf) => {
-    const msg = decode(buf); if (!msg) return
-    applyRemote(msg)
-  })
-  socket.once('close', () => {
-    conn.closed = true
-    conns.delete(conn); peerCount = conns.size; updatePeerCount()
-  })
-  socket.once('error', () => {
-    conn.closed = true
-    conns.delete(conn); peerCount = conns.size; updatePeerCount()
-  })
-}
-
-function updatePeerCount() {
-  ui.peersCount.textContent = String(peerCount+1)
-}
-
-// op queue with simple backpressure
-const outbox = []
-let flushing = false
-function queueOp(op) {
-  outbox.push(op)
-  flushOutbox()
-}
-function flushOutbox() {
-  if (flushing) return
-  flushing = true
-  while (outbox.length) {
-    const op = outbox.shift()
-    broadcast(op)
-  }
-  flushing = false
-}
-
-function broadcast(op) {
-  const payload = encode(op)
-  for (const c of conns) {
-    if (c.closed) continue
-    try {
-      c.sock.write(payload)
-    } catch (e) {
-      // drop on error
-    }
-  }
-}
-
-function safeSend(conn, obj) {
-  try { conn.sock.write(encode(obj)) } catch {}
-}
-
-function serializeDoc() {
-  // lightweight snapshot
-  return { version: doc.version, order: doc.order, objects: doc.objects }
-}
-
-function applySnapshot(snap) {
-  // accept newer snapshots only
-  if (!snap || (snap.version ?? -1) < (doc.version ?? -1)) return
-  doc.order = [...snap.order]
-  doc.objects = {}
-  for (const id of doc.order) {
-    doc.objects[id] = snap.objects[id]
-  }
-  doc.version = snap.version
-  requestRender()
-}
-
-// Message handler
-function applyRemote(msg) {
-  switch (msg.t) {
-    case 'hello':
-      applySnapshot(msg.doc)
-      // reply with our latest version if we are ahead
-      if (doc.version > (msg.doc?.version ?? -1)) {
-        broadcast({ t: 'full', snapshot: serializeDoc() })
-      }
-      break
-    case 'full':
-      applySnapshot(msg.snapshot)
-      break
-    case 'add': {
-      const o = msg.obj
-      if (doc.objects[o.id]) return
-      doc.objects[o.id] = o
-      doc.order.push(o.id)
-      bumpDoc(); requestRender()
-      break
-    }
-    case 'update': {
-      const o = doc.objects[msg.id]; if (!o) return
-      // last-writer-wins by rev
-      if ((msg.patch.rev ?? 0) < (o.rev ?? 0)) return
-      Object.assign(o, msg.patch)
-      bumpDoc(); requestRender()
-      break
-    }
-    case 'patch': { // append to points
-      const o = doc.objects[msg.id]; if (!o || !o.points) return
-      o.points.push(msg.push)
-      o.rev++; bumpDoc(); requestRender()
-      break
-    }
-    case 'touch': {
-      const o = doc.objects[msg.id]; if (o) { o.rev++; bumpDoc(); requestRender() }
-      break
-    }
-    case 'move': {
-      const o = doc.objects[msg.id]; if (!o) return
-      if ((msg.patch.rev ?? 0) < (o.rev ?? 0)) return
-      if (msg.patch.points) o.points = msg.patch.points
-      o.x = msg.patch.x; o.y = msg.patch.y; o.rev = msg.patch.rev
-      bumpDoc(); requestRender()
-      break
-    }
-    case 'delete': {
-      const id = msg.id
-      if (!doc.objects[id]) return
-      delete doc.objects[id]
-      doc.order = doc.order.filter(x => x !== id)
-      bumpDoc(); requestRender()
-      break
-    }
-    case 'clear': {
-      doc.objects = {}; doc.order = []; bumpDoc(); requestRender()
-      break
-    }
-    case 'cursor': {
-      // if (msg.from.name === peerName || msg.from.id === localPeerId) return;
-      updatePeerCursor(msg.from.id, msg.from.name, { x: msg.x, y: msg.y });
-      renderPeerCursors();
-      break;
-    }
-  }
-}
-
-function logNames() {
-  console.log('Peer names:');
-  for (const [peerId, name] of peerNames) {
-    console.log(peerId, name);
-  }
-}
-
-function logCursors() {
-  console.log('Peer cursors:');
-  for (const [peerId, cur] of peerCursors) {
-    console.log(peerId, cur);
-  }
-}
-
-logNames()
-logCursors()
-
-const buttons = document.querySelectorAll('button');
-
-buttons.forEach(b => {
-  b.addEventListener('click', () => {
-    logNames()
-    logCursors()
-  })
-})
-
-function renderPeerCursors() {
-  document.querySelectorAll('.peer-cursor').forEach(el => el.remove());
-
-  for (const [peerId, cur] of peerCursors.entries()) {
-    if (peerId === localPeerId && peerName === cur.name) continue;
-
-    const {bg, text} = getRandomColorPair()
-
-    let el = document.createElement('p');
-    el.className = 'peer-cursor';
-    el.style.cssText = `
-      position:fixed;
-      left:${cur.cursor.x}px; top:${cur.cursor.y}px;
-      width: fit-content;
-      height: fit-content;
-      background: ${bg};
-      border-radius: 4px 50px 50px 50px;
-      pointer-events: none;
-      transition: left 60ms linear, top 60ms linear;
-      box-shadow: 0 6px 20px rgba(251, 0, 102, 0.2);
-      z-index: 9999;
-      color: ${text};
-      padding: 4px 8px;
-    `;
-    el.textContent = cur.name !== '' ? cur.name : peerId
-    document.body.appendChild(el);
-  }
-
-  if (ui.mouse) {
-    ui.mouse.textContent = 'You';
-  }
-}
-
-
-function encode(obj) { return b4a.from(JSON.stringify(obj)) }
-function decode(buf) { try { return JSON.parse(b4a.toString(buf)) } catch { return null } }
-
-// ---------- Utilities ----------
-function toCanvas(e) {
-  const r = ui.canvas.getBoundingClientRect()
-  return { x: e.clientX - r.left, y: e.clientY - r.top }
-}
-function randomId() {
-  return crypto.randomBytes(4).toString('hex'); // 4 bytes → 8 hex chars
-}
-function hex(buf) { return Buffer.from(buf).toString('hex') }
-
-function savePNG() {
-  const tmp = document.createElement('canvas')
-  tmp.width = ui.canvas.width
-  tmp.height = ui.canvas.height
-  const tctx = tmp.getContext('2d')
-  tctx.drawImage(ui.canvas, 0, 0)
-  const url = tmp.toDataURL('image/png')
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `whiteboard-${Date.now()}.png`
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-// ---------- Boot ----------
-(function boot() {
-  // show setup screen; toolbar/board are initially hidden in your HTML/CSS
-  // IDs used here match your markup (Create/Join buttons, topic field, toolbar)
-  // Toolbar & canvas are revealed after networking is ready.
-  // (See index.html, #create-canvas / #join-canvas / #join-canvas-topic / #canvas-topic / #peers-count)
-  // Keyboard hint: hold Shift to move any object (cursor changes to "move" on hover).
-})();
