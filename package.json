@@ -1,8 +1,9 @@
 {
-  "name": "whiteboard",
+  "name": "pearboard",
   "main": "index.html",
+  "version": "1.0.2",
   "pear": {
-    "name": "whiteboard",
+    "name": "pearboard",
     "type": "desktop",
     "gui": {
       "backgroundColor": "#1F2430",

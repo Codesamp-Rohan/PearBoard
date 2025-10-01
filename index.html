@@ -8,15 +8,28 @@
 </head>
 <body>
 <p class="drag-msg">Use <b>shift</b> to drag</p>
+<div class="left-top-data">
+  <button class="canvas-room-key hidden" type="button">
+    <p>Canvas Topic</p><p id="canvas-topic"></p><img class="icon" src="./assets/copy.png" alt="copy-img">
+  </button>
+  <button class="group hidden" type="button" id="peer-count-btn">
+    <p>Peers Count : </p><p id="peers-count">1</p>
+  </button>
+  <div>
+    <button style="display: flex; flex-direction: row; align-items: center; gap: 4px;" class="button peer-name-container" type="button">
+      <p id="local-peer-name" class="name--btn"></p>
+      <img class="icon" src="./assets/arrow.png" alt="copy-img">
+    </button>
+<div class="hidden" id="name--input--popup">
+  <input style="font-size: 12px;" id="username-input" placeholder="Enter your name" />
+  <button style="font-size: 12px;" id="username-submit">Submit</button>
+</div>
+  </div>
+</div>
 <div id="titlebar">
   <pear-ctrl></pear-ctrl>
 </div>
 <div id="setup">
-      <button id="local-peer-name" class="name--btn"></button>
-      <div class="hidden" id="name--input--popup">
-         <input id="username-input" placeholder="Enter your name" />
-         <button id="username-submit">Submit</button>
-      </div>
   <div>
     <button id="create-canvas">Create</button>
   </div>
@@ -30,7 +43,8 @@
 </div>
 <div id="loading" class="hidden">Loading ...</div>
 <header class="toolbar hidden" role="toolbar" aria-label="Whiteboard toolbar">
-  <div class="group" id="tools">
+  <div class="btn--container">
+  <div class="group" id="tools" style="gap: 4px;">
     <button class="btn active" data-tool="pen" title="Pen (P)">✏️</button>
     <button class="btn" data-tool="eraser" title="Eraser (E)">🧽</button>
     <button class="btn" data-tool="line" title="Line (L)">／</button>
@@ -40,29 +54,21 @@
     <button class="btn" data-tool="text" title="Text (T)">🅣</button>
     <button class="btn" data-tool="hand" title="Hand (H)">✋🏿</button>
   </div>
-
-  <div class="group">
-    <label class="label">Color <input id="color" type="color" value="#111111" style="padding: 0" /></label>
-    <label class="label">Size <input id="size" type="range" min="1" max="50" value="6" /></label>
-  </div>
-  <div class="group">
-    <label for="opacity-control">Opacity:</label>
-    <input type="range" id="opacity-control" min="0" max="1" step="0.05" value="1" />
-  </div>
-
-  <div class="group">
+  <div class="group" style="gap: 4px;">
     <button id="undo" class="btn" title="Undo (Ctrl/Cmd+Z)">↶</button>
     <button id="redo" class="btn" title="Redo (Ctrl/Cmd+Shift+Z)">↷</button>
     <button id="clear" class="btn" title="Clear">🗑️</button>
     <button id="save" class="btn" title="Save PNG">💾</button>
   </div>
-
-  <div class="group">
-    <p>Key : </p><p id="canvas-topic"></p>
   </div>
-  <button class="group" type="button" id="peer-count-btn">
-    <p>Peers Count : </p><p id="peers-count">1</p>
-  </button>
+  <div class="group">
+    <label class="label">Color <input id="color" type="color" value="#111111" style="padding: 0" /></label>
+    <label class="label">Size <input id="size" type="range" min="1" max="50" value="6" /></label>
+  </div>
+  <div class="group">
+    <label for="opacity-control" class="label">Opacity:</label>
+    <input type="range" id="opacity-control" min="0" max="1" step="0.05" value="1" />
+  </div>
 </header>
 
 <div id="peers-list" class="hidden">
