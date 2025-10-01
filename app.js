@@ -9,7 +9,7 @@
 import Hyperswarm from 'hyperswarm';
 import b4a from 'b4a';
 import crypto from 'hypercore-crypto';
-import { getRandomColorPair } from "./helper.js";
+import {addAlphaToColor, getRandomColorPair} from "./helper.js";
 
 // ============================================================================
 // CONSTANTS & CONFIGURATION
@@ -46,6 +46,8 @@ class AppState {
     this.touchPanning = false;
     this.showGrid = true;
     this.dirty = true;
+
+    this.eraserPath = null;
 
     // Object state
     this.activeId = null;
@@ -126,6 +128,10 @@ const ui = {
   peersCount: $('#peers-count'),
   localPeerName: $('#local-peer-name'),
 
+  // Button/Grp
+  peerCountBtn: $('#peer-count-btn'),
+  canvasRoomKey: $('.canvas-room-key'),
+
   // Tools
   tools: $('#tools'),
   color: $('#color'),
@@ -140,6 +146,7 @@ const ui = {
 
 //   Canvas
   scaleDisplay: $('#zoom-scale-display'),
+  opacitySlider: $('#opacity-control'),
 };
 
 // ============================================================================
@@ -182,6 +189,7 @@ class CanvasManager {
     this.resizeCanvas();
     this.setupEventListeners();
     this.startRenderLoop();
+    this.renderFrame();
   }
 
   static resizeCanvas() {
@@ -268,9 +276,22 @@ class CanvasManager {
   }
 
   static renderFrame() {
-    if (!state.dirty) return;
-    state.dirty = false;
+    if (state.tool === 'eraser' && state.eraserPath && state.eraserPath.length > 0) {
+      // Render eraser preview
+      state.ctx.save();
+      state.ctx.globalCompositeOperation = 'source-over';
+      state.ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+      state.ctx.lineWidth = state.strokeSize;
+      state.ctx.lineCap = 'round';
 
+      state.ctx.beginPath();
+      state.ctx.moveTo(state.eraserPath[0].x, state.eraserPath[0].y);
+      for (let i = 1; i < state.eraserPath.length; i++) {
+        state.ctx.lineTo(state.eraserPath[i].x, state.eraserPath[i].y);
+      }
+      state.ctx.stroke();
+      state.ctx.restore();
+    }
     // Clear canvas
     state.ctx.setTransform(1, 0, 0, 1, 0, 0);
     state.ctx.clearRect(0, 0, ui.canvas.width, ui.canvas.height);
@@ -426,12 +447,25 @@ class ObjectRenderer {
   }
 
   static renderObject(obj) {
+    if (obj.type === 'eraser') return;
     state.ctx.save();
     const strokeWidth = (obj.strokeWidth ?? 2) / state.zoom;
     state.ctx.lineWidth = obj.size;
     state.ctx.lineCap = 'round';
     state.ctx.lineJoin = 'round';
-    state.ctx.strokeStyle = obj.type === 'eraser' ? '#ffffff' : obj.color;
+    // state.ctx.strokeStyle = obj.type === 'eraser' ? state.ctx.globalCompositeOperation = "destination-out" : obj.color;
+
+    if (obj.type === "eraser") {
+      // state.ctx.globalCompositeOperation = "destination-out";
+      // state.ctx.strokeStyle = "rgba(0,0,0,1)";
+      // state.ctx.fillStyle = "rgba(0,0,0,1)";
+      return
+    } else {
+      state.ctx.globalCompositeOperation = "source-over";
+      const alpha = typeof obj.opacity === 'number' ? obj.opacity : 1;
+      state.ctx.strokeStyle = addAlphaToColor(obj.color, alpha);
+      state.ctx.fillStyle = addAlphaToColor(obj.color, alpha);
+    }
 
     switch (obj.type) {
       case 'pen':
@@ -464,6 +498,8 @@ class ObjectRenderer {
 
     if (obj.type === 'eraser') {
       state.ctx.globalCompositeOperation = 'destination-out';
+    } else {
+      state.ctx.globalCompositeOperation = "source-over";
     }
 
     state.ctx.beginPath();
@@ -473,7 +509,9 @@ class ObjectRenderer {
     }
 
     state.ctx.stroke();
-    state.ctx.globalCompositeOperation = 'source-over';
+    if (obj.type === 'eraser') {
+      state.ctx.globalCompositeOperation = 'source-over';
+    }
   }
 
   static renderLine(obj) {
@@ -634,6 +672,12 @@ class DrawingTools {
   }
 
   static beginFreeDrawing(id, type, x, y) {
+    if (type === 'eraser') {
+      state.activeId = id;
+      state.eraserPath = [{ x, y }];
+      return;
+    }
+
     const obj = {
       id,
       type,
@@ -642,6 +686,7 @@ class DrawingTools {
       points: [{ x, y }],
       color: state.strokeColor,
       size: state.strokeSize,
+      opacity: state.strokeOpacity ?? 1,
       createdBy: state.localPeerId,
       rev: 0
     };
@@ -651,6 +696,12 @@ class DrawingTools {
   }
 
   static addPoint(id, x, y) {
+    if (state.tool === 'eraser') {
+      state.eraserPath.push({ x, y });
+      this.checkEraserIntersections({ x, y }); // Detect and delete intersected objects
+      return;
+    }
+
     const obj = state.doc.objects[id];
     if (!obj || !obj.points) return;
 
@@ -661,8 +712,115 @@ class DrawingTools {
     NetworkManager.queueOperation({ t: 'patch', id, path: 'points', push: { x, y } });
   }
 
+  static checkEraserIntersections(currentPoint) {
+    const eraserRadius = state.strokeSize;
+    const objectsToDelete = [];
+
+    for (const objId of state.doc.order) {
+      const obj = state.doc.objects[objId];
+      if (!obj || obj.type === 'eraser') continue;
+
+      if (this.objectIntersectsPoint(obj, currentPoint, eraserRadius)) {
+        objectsToDelete.push(objId);
+      }
+    }
+
+    objectsToDelete.forEach(id => {
+      DocumentManager.deleteObject(id, true);
+    });
+  }
+
+  static objectIntersectsPoint(obj, point, radius) {
+    switch (obj.type) {
+      case 'pen':
+        return this.pathIntersectsPoint(obj.points || [], point, radius);
+      case 'line':
+        return this.lineIntersectsPoint(obj, point, radius);
+      case 'rect':
+      case 'ellipse':
+      case 'diamond':
+        return this.shapeIntersectsPoint(obj, point, radius);
+      case 'text':
+        return this.textIntersectsPoint(obj, point, radius);
+      default:
+        return false;
+    }
+  }
+
+  static pathIntersectsPoint(points, point, radius) {
+    for (let i = 0; i < points.length - 1; i++) {
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      if (this.lineSegmentIntersectsCircle(p1, p2, point, radius)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static lineIntersectsPoint(obj, point, radius) {
+    const start = { x: obj.x, y: obj.y };
+    const end = { x: obj.x + (obj.w || 0), y: obj.y + (obj.h || 0) };
+    return this.lineSegmentIntersectsCircle(start, end, point, radius);
+  }
+
+  static shapeIntersectsPoint(obj, point, radius) {
+    const bounds = GeometryUtils.getBounds(obj);
+    // Expand bounds by eraser radius
+    return point.x >= bounds.x - radius &&
+        point.x <= bounds.x + bounds.w + radius &&
+        point.y >= bounds.y - radius &&
+        point.y <= bounds.y + bounds.h + radius;
+  }
+
+  static textIntersectsPoint(obj, point, radius) {
+    const bounds = GeometryUtils.getBounds(obj);
+    // Expand bounds by eraser radius
+    return point.x >= bounds.x - radius &&
+        point.x <= bounds.x + bounds.w + radius &&
+        point.y >= bounds.y - radius &&
+        point.y <= bounds.y + bounds.h + radius;
+  }
+
+  static lineSegmentIntersectsCircle(p1, p2, center, radius) {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+
+    if (length === 0) {
+      // Point to point distance
+      const dist = Math.sqrt((p1.x - center.x) ** 2 + (p1.y - center.y) ** 2);
+      return dist <= radius;
+    }
+
+    const unitX = dx / length;
+    const unitY = dy / length;
+
+    const toPointX = center.x - p1.x;
+    const toPointY = center.y - p1.y;
+
+    const dot = toPointX * unitX + toPointY * unitY;
+    const closestPoint = {
+      x: p1.x + Math.max(0, Math.min(length, dot)) * unitX,
+      y: p1.y + Math.max(0, Math.min(length, dot)) * unitY
+    };
+
+    const distance = Math.sqrt(
+        (center.x - closestPoint.x) ** 2 + (center.y - closestPoint.y) ** 2
+    );
+
+    return distance <= radius;
+  }
+
+
   static finishStroke(id) {
     if (!id) return;
+
+    if (state.tool === 'eraser') {
+      state.eraserPath = null;
+      return;
+    }
+
     NetworkManager.queueOperation({ t: 'touch', id });
   }
 
@@ -676,6 +834,7 @@ class DrawingTools {
       h: 0,
       color: state.strokeColor,
       size: state.strokeSize,
+      opacity: state.strokeOpacity ?? 1,
       createdBy: state.localPeerId,
       rev: 0
     };
@@ -1650,7 +1809,7 @@ class UIManager {
   }
 
   static setupUserNameHandlers() {
-    ui.localPeerName.addEventListener('click', (e) => {
+    document.querySelector('.peer-name-container').addEventListener('click', (e) => {
       e.preventDefault();
       ui.namePopup.classList.toggle('hidden');
     });
@@ -1679,6 +1838,10 @@ class UIManager {
     ui.size.addEventListener('input', () => {
       state.strokeSize = parseInt(ui.size.value, 10);
     });
+
+    ui.opacitySlider.addEventListener('input', (e) => {
+      state.strokeOpacity = parseFloat(e.target.value)
+    })
 
     ui.undo.addEventListener('click', () => HistoryManager.undo());
     ui.redo.addEventListener('click', () => HistoryManager.redo());
@@ -1758,6 +1921,8 @@ class UIManager {
     ui.loading.classList.add('hidden');
     ui.toolbar.classList.remove('hidden');
     ui.boardWrap.classList.remove('hidden');
+    ui.peerCountBtn.classList.remove('hidden');
+    ui.canvasRoomKey.classList.remove('hidden');
   }
 }
 
@@ -1772,7 +1937,7 @@ class SessionManager {
     state.joined = true;
     state.topicKey = topicHex;
     UIManager.showLoading();
-    ui.topicOut.textContent = topicHex;
+    ui.topicOut.dataset.value = topicHex;
 
     try {
       await NetworkManager.initSwarm(topicHex);
@@ -2102,6 +2267,17 @@ class WhiteboardApp {
 document.addEventListener('DOMContentLoaded', () => {
   WhiteboardApp.init();
 });
+
+ui.canvasRoomKey.addEventListener('click', () => {
+  const textToCopy = ui.topicOut.getAttribute('data-value')
+  if(navigator.clipboard) {
+    navigator.clipboard.writeText(textToCopy).then(() => {
+      alert('Copied to clipboard!');
+    }).catch(err => {
+      console.error('Failed to copy: ', err);
+    });
+  }
+})
 
 // Export for potential external use
 if (typeof module !== 'undefined' && module.exports) {

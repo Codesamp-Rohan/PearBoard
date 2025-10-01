@@ -16,7 +16,7 @@ pear-ctrl[data-platform="darwin"] { margin-top: 12px; margin-left: 10px; }
   --ink:#111;
   --muted:#e9edf1;
   --ui:#f8fafc;
-  --btn: #e7eff6;
+  --btn: #fff;
   --btn-active:#e2e8f0;
   --shadow:0 6px 20px rgba(0,0,0,.08);
 }
@@ -71,19 +71,69 @@ button, input, h4 {
   align-self: center;
 }
 
+.bg-img{
+  position: fixed;
+  width: 300px;
+  top: 30%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
 
 .toolbar{
-  position:sticky; top:32px; z-index:10;
-  display:flex; gap:16px; align-items:center; justify-content:space-between;
-  padding:10px 14px; background:var(--ui); border-bottom:1px solid var(--muted);
-  box-shadow:var(--shadow);
-  flex-wrap: wrap;
+  position: fixed;
+  background: #fff;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  border-radius: 12px;
+  gap: 0;
+  top: 48px;
+  left: 16px;
+  box-shadow: 0 10px 10px #ddd;
+  z-index: 999;
 }
 .group{display:flex; align-items:center; gap:8px}
+.btn--container {
+  position:fixed; bottom:0;
+  z-index:10;
+  transform: translate(-50%, -50%);
+  left:50%;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: fit-content;
+  padding: 7px;
+  border-radius:12px;
+  background:var(--ui);
+  border-bottom:1px solid var(--muted);
+  box-shadow:var(--shadow);
+}
+
+.left-top-data{
+  position: fixed;
+  top: 48px;
+  right: 16px;
+  z-index: 999;
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+#local-peer-name{
+  z-index: 999;
+  font-size: 12px;
+}
+.icon {
+  width: 12px;
+  height: 12px;
+}
 .label{display:flex; align-items:center; gap:6px; font-size:13px; color:#334155}
 input[type="range"]{width:140px}
 p {
-  font-size: 10px;
+  font-size: 12px;
 }
 .btn{
   border:1px solid var(--muted);
@@ -94,10 +144,11 @@ p {
 .btn.active{outline:2px solid #93c5fd; background:#e0f2fe}
 
 .board-wrap{
-  position:relative; height:calc(100vh - 64px); /* header height approximation */
+  position:relative; height:calc(100vh); /* header height approximation */
 }
 #board{
-  position:absolute; inset:0;
+  position:absolute;
+  top: 32px;
   display:block; width:100%; height:100%;
   background:#ebebeb; cursor:crosshair;
 }
@@ -148,34 +199,30 @@ p {
   box-shadow: 0 10px 10px #777;
 }
 
-.name--btn {
-  position: fixed;
-  top: 32px;
-  right: 32px;
-  z-index: 100;
+.canvas-room-key {
+  box-shadow: 0 10px 10px #ddd;
   display: flex;
   flex-direction: row;
-  gap: 4px;
   align-items: center;
-  justify-content: center;
-  padding: 4px 8px;
-  cursor: pointer;
+  gap: 4px;
 }
 
 #name--input--popup{
   position: fixed;
-  top: 72px;
-  right: 32px;
+  top: 92px;
+  right: 16px;
   padding: 8px;
   z-index: 100;
   display: flex;
   flex-direction: row;
   border-radius: 50px;
   border: 1px solid var(--muted);
-  box-shadow: 0 10px 10px #ebebeb;
+  box-shadow: 0 10px 10px #ddd;
+  background: var(--btn);
   gap: 4px;
   align-items: center;
   justify-content: center;
+  font-size: 14px;
 }
 
 /*Dropdown*/
@@ -193,4 +240,9 @@ p {
   z-index: 10000;
   user-select: none;
   pointer-events: none;
+}
+
+#peer-count-btn {
+  border: 1px solid var(--muted);
+  box-shadow: 0 10px 10px #ddd;
 }
