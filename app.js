@@ -1,15 +1,126 @@
-// app.js â€“ P2P Collaborative Whiteboard (Optimized with Fixed Mouse Tracking)
-
-// Runtime: Pear/Holepunch (browser), Hyperswarm, vanilla canvas
-
-// Keys: Shift = move/drag selection, Ctrl/Cmd+Z = undo, Ctrl/Cmd+Shift+Z = redo
-
-// Tools: P (pen), E (eraser), L (line), R (rect), O (ellipse), D (diamond), T (text)
-
 import Hyperswarm from 'hyperswarm';
 import b4a from 'b4a';
 import crypto from 'hypercore-crypto';
 import {addAlphaToColor, getRandomColorPair} from "./helper.js";
+
+import Hypercore from 'hypercore';
+
+// ============================================================================
+// HYPERCORE SAVE STATE SYSTEM
+// ============================================================================
+
+class HypercoreSaveManager {
+  static cores = new Map();
+
+  static async initCore(roomKey) {
+    if (this.cores.has(roomKey)) {
+      return this.cores.get(roomKey);
+    }
+
+    try {
+      // Create hypercore with room key as storage path
+      const core = new Hypercore(`./storage/${roomKey}`, {
+        valueEncoding: 'json'
+      });
+
+      await core.ready();
+      this.cores.set(roomKey, core);
+
+      console.log('âœ… Hypercore initialized for room:', roomKey);
+      console.log('Core key:', core.key.toString('hex'));
+
+      return core;
+    } catch (error) {
+      console.error('Failed to initialize Hypercore:', error);
+      return null;
+    }
+  }
+
+  static async saveDrawingState(roomKey) {
+    if (!state.topicKey || !roomKey) {
+      console.warn('Cannot save: No active room');
+      return false;
+    }
+
+    try {
+      const core = await this.initCore(roomKey);
+      if (!core) return false;
+
+      const drawingData = {
+        version: state.doc.version,
+        order: [...state.doc.order],
+        objects: { ...state.doc.objects },
+        savedAt: Date.now(),
+        savedBy: state.localPeerId,
+        roomKey: roomKey
+      };
+
+      // Append to hypercore (latest entry = current state)
+      await core.append(drawingData);
+
+      console.log('âœ… Drawing state saved to Hypercore for room:', roomKey);
+      console.log('Core length:', core.length);
+
+      // Broadcast save notification
+      NetworkManager.broadcast({
+        t: 'hypercore_saved',
+        from: state.localPeerId,
+        roomKey: roomKey,
+        savedAt: drawingData.savedAt,
+        coreLength: core.length
+      });
+
+      return true;
+    } catch (error) {
+      console.error('âŒ Failed to save to Hypercore:', error);
+      return false;
+    }
+  }
+
+  static async loadLatestDrawing(roomKey) {
+    try {
+      const core = await this.initCore(roomKey);
+      if (!core || core.length === 0) {
+        console.log('No saved drawing found for room:', roomKey);
+        return false;
+      }
+
+      // Get the latest entry (last item in hypercore)
+      const latestIndex = core.length - 1;
+      const latestData = await core.get(latestIndex);
+
+      if (!latestData || !latestData.objects || !latestData.order) {
+        console.warn('Invalid drawing data in Hypercore');
+        return false;
+      }
+
+      // Apply loaded state
+      state.doc.objects = { ...latestData.objects };
+      state.doc.order = [...latestData.order];
+      state.doc.version = latestData.version || 0;
+
+      state.requestRender();
+
+      console.log('âœ… Loaded latest drawing from Hypercore for room:', roomKey);
+      console.log('Loaded', state.doc.order.length, 'objects from entry', latestIndex);
+
+      return true;
+    } catch (error) {
+      console.error('âŒ Failed to load from Hypercore:', error);
+      return false;
+    }
+  }
+
+  static async hasDrawings(roomKey) {
+    try {
+      const core = await this.initCore(roomKey);
+      return core && core.length > 0;
+    } catch (error) {
+      return false;
+    }
+  }
+}
+
 
 // ============================================================================
 // CONSTANTS & CONFIGURATION
@@ -53,7 +164,9 @@ class AppState {
     this.activeId = null;
     this.hoverId = null;
     this.start = null;
-    this.dragOffset = { x: 0, y: 0 };
+    // this.dragOffset = { x: 0, y: 0 };
+    this.dragStart = null;
+    this.dragInitialPos = null;
     this.tempShape = null;
     this.textEl = null;
 
@@ -140,6 +253,7 @@ const ui = {
   redo: $('#redo'),
   clear: $('#clear'),
   save: $('#save'),
+  saveState: $('#save-state'),
   peerNameBtn: $('#username-submit'),
   peerNameInput: $('#username-input'),
   namePopup: $('#name--input--popup'),
@@ -1114,7 +1228,7 @@ class HistoryManager {
     if (!entry) return;
 
     switch (entry.t) {
-      case 'del': // Undo add â†’ delete
+      case 'del': // Undo add Ã¢â€ â€™ delete
         const obj = state.doc.objects[entry.id];
         if (obj) {
           DocumentManager.deleteObject(entry.id, false);
@@ -1122,7 +1236,7 @@ class HistoryManager {
         }
         break;
 
-      case 'add': // Undo delete â†’ add
+      case 'add': // Undo delete Ã¢â€ â€™ add
         DocumentManager.addObject(entry.obj, false);
         state.redoStack.push({ t: 'del', id: entry.obj.id, before: entry.obj });
         break;
@@ -1280,18 +1394,20 @@ class InputHandler {
     if (state.isDragging) {
       state.isDragging = false;
       state.activeId = null;
+      state.dragStart = null;
+      state.dragInitialPos = null;
       return;
     }
 
     if (!state.drawing) return;
 
     state.drawing = false;
-    if (state.tool === 'pen' || state.tool === 'eraser') {
+    if (['pen', 'eraser'].includes(state.tool)) {
       DrawingTools.finishStroke(state.activeId);
     }
-
     state.activeId = null;
   }
+
 
   static handleDoubleClick(event) {
     const coords = CoordinateUtils.toCanvas(event);
@@ -1326,13 +1442,22 @@ class InputHandler {
   static startDragging(objectId, coords) {
     state.activeId = objectId;
     state.isDragging = true;
+
     const obj = state.doc.objects[objectId];
-    const bounds = GeometryUtils.getBounds(obj);
-    state.dragOffset = {
-      x: coords.x - bounds.x,
-      y: coords.y - bounds.y
-    };
+    if (!obj) return;
+
+    state.dragStart = { x: coords.x, y: coords.y };
+
+    if (obj.points) {
+      const bounds = GeometryUtils.getBounds(obj);
+      state.dragInitialPos = { x: bounds.x, y: bounds.y };
+    } else {
+      state.dragInitialPos = { x: obj.x, y: obj.y };
+    }
+
+    console.log('Starting drag:', { objectId, coords, initialPos: state.dragInitialPos });
   }
+
 
   static startDrawing(coords) {
     state.drawing = true;
@@ -1366,23 +1491,28 @@ class InputHandler {
 
   static continueDragging(coords) {
     const obj = state.doc.objects[state.activeId];
-    if (!obj) return;
+    if (!obj || !state.dragStart || !state.dragInitialPos) return;
 
-    const newX = coords.x - state.dragOffset.x;
-    const newY = coords.y - state.dragOffset.y;
+    const deltaX = coords.x - state.dragStart.x;
+    const deltaY = coords.y - state.dragStart.y;
+
+    const newX = state.dragInitialPos.x + deltaX;
+    const newY = state.dragInitialPos.y + deltaY;
 
     if (obj.points) {
-      // Move path points
-      const deltaX = newX - obj.x;
-      const deltaY = newY - obj.y;
+      const currentBounds = GeometryUtils.getBounds(obj);
+      const moveX = newX - currentBounds.x;
+      const moveY = newY - currentBounds.y;
+
       obj.points = obj.points.map(point => ({
-        x: point.x + deltaX,
-        y: point.y + deltaY
+        x: point.x + moveX,
+        y: point.y + moveY
       }));
+    } else {
+      obj.x = newX;
+      obj.y = newY;
     }
 
-    obj.x = newX;
-    obj.y = newY;
     obj.rev++;
     state.bumpDoc();
     state.requestRender();
@@ -1390,7 +1520,12 @@ class InputHandler {
     NetworkManager.queueOperation({
       t: 'move',
       id: obj.id,
-      patch: { x: obj.x, y: obj.y, points: obj.points || null, rev: obj.rev }
+      patch: {
+        x: obj.x,
+        y: obj.y,
+        points: obj.points || null,
+        rev: obj.rev
+      }
     });
   }
 
@@ -1847,6 +1982,7 @@ class UIManager {
     ui.redo.addEventListener('click', () => HistoryManager.redo());
     ui.clear.addEventListener('click', () => DocumentManager.clearAll(true));
     ui.save.addEventListener('click', () => this.saveCanvasAsPNG());
+    ui.saveState.addEventListener('click', () => this.saveDrawingState());
   }
 
   static setupSessionHandlers() {
@@ -1901,6 +2037,25 @@ class UIManager {
     link.click();
     URL.revokeObjectURL(dataUrl);
   }
+  static async saveDrawingState() {
+    if (!state.topicKey) {
+      alert('No active room to save to');
+      return;
+    }
+
+    const success = await HypercoreSaveManager.saveDrawingState(state.topicKey);
+    if (success) {
+      alert('âœ… Drawing state saved to Hypercore!');
+      // Show visual feedback
+      ui.saveState.textContent = 'âœ…';
+      setTimeout(() => {
+        ui.saveState.textContent = 'ðŸ’¾';
+      }, 2000);
+    } else {
+      alert('âŒ Failed to save drawing state');
+    }
+  }
+
 
   static showSetup() {
     ui.setup.classList.remove('hidden');
@@ -1943,6 +2098,27 @@ class SessionManager {
       await NetworkManager.initSwarm(topicHex);
       UIManager.showWorkspace();
       CanvasManager.resizeCanvas();
+
+      // AUTO-LOAD: Try to load saved drawing from Hypercore
+      setTimeout(async () => {
+        try {
+          const hasDrawings = await HypercoreSaveManager.hasDrawings(topicHex);
+          if (hasDrawings) {
+            const loaded = await HypercoreSaveManager.loadLatestDrawing(topicHex);
+            if (loaded) {
+              console.log('ðŸŽ¨ Auto-loaded saved drawing for room:', topicHex);
+              // Broadcast loaded state to other peers
+              NetworkManager.broadcast({
+                t: 'full',
+                snapshot: NetworkManager.serializeDocument()
+              });
+            }
+          }
+        } catch (error) {
+          console.error('Failed to auto-load drawing:', error);
+        }
+      }, 1000); // Wait for network to stabilize
+
     } catch (error) {
       console.error('Failed to start networking:', error);
       alert('Failed to start networking');
@@ -2111,6 +2287,10 @@ class NetworkManager {
 
       case 'cursor':
         this.handleCursorMessage(message);
+        break;
+
+      case 'hypercore_saved':
+        console.log('ðŸ“ Peer', message.from, 'saved drawing to Hypercore at', new Date(message.savedAt));
         break;
     }
   }
