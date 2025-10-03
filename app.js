@@ -5,6 +5,8 @@ import {addAlphaToColor, getRandomColorPair} from "./helper.js";
 
 import Hypercore from 'hypercore';
 
+const PEAR_PATH = Pear.config.storage
+
 // ============================================================================
 // HYPERCORE SAVE STATE SYSTEM
 // ============================================================================
@@ -18,8 +20,7 @@ class HypercoreSaveManager {
     }
 
     try {
-      // Create hypercore with room key as storage path
-      const core = new Hypercore(`./storage/${roomKey}`, {
+      const core = new Hypercore(`${PEAR_PATH}/${roomKey}`, {
         valueEncoding: 'json'
       });
 
