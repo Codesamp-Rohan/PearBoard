@@ -9,6 +9,9 @@
 <body>
 <p class="drag-msg">Use <b>shift</b> to drag</p>
 <div class="left-top-data">
+  <button class="load-state-btn" type="button">
+    <p>💾 Load State</p>
+  </button>
   <button class="canvas-room-key hidden" type="button">
     <p>Canvas Topic</p><p id="canvas-topic"></p><img class="icon" src="./assets/copy.png" alt="copy-img">
   </button>
@@ -28,8 +31,15 @@
 </div>
 <div id="titlebar">
   <pear-ctrl></pear-ctrl>
+  <p id="version"></p>
 </div>
 <div id="setup">
+  <div id="peers-list-container">
+    <h5 style="padding: 0 8px">Saved Canvas History</h5>
+  <div id="peers-list" class="">
+  </div>
+  </div>
+  <div id="create-join-container">
   <div>
     <button id="create-canvas">Create</button>
   </div>
@@ -39,6 +49,7 @@
   <div id="join-form">
     <button type="button" id="join-canvas">Join</button>
     <input required id="join-canvas-topic" type="text" placeholder="Chat room Topic" />
+  </div>
   </div>
 </div>
 <div id="loading" class="hidden">Loading ...</div>
@@ -53,13 +64,12 @@
     <button class="btn" data-tool="diamond" title="Diamond (D)">⬥</button>
     <button class="btn" data-tool="text" title="Text (T)">🅣</button>
     <button class="btn" data-tool="hand" title="Hand (H)">✋🏿</button>
-  </div>
-  <div class="group" style="gap: 4px;">
     <button id="undo" class="btn" title="Undo (Ctrl/Cmd+Z)">↶</button>
     <button id="redo" class="btn" title="Redo (Ctrl/Cmd+Shift+Z)">↷</button>
     <button id="clear" class="btn" title="Clear">🗑️</button>
     <button id="save" class="btn" title="Save PNG">💾</button>
     <button id="save-state" class="btn" title="Save State">💾 💾</button>
+    <button id="delete-state" class="btn" title="Delete State">❌</button>
   </div>
   </div>
   <div class="group">
@@ -72,9 +82,6 @@
   </div>
 </header>
 
-<div id="peers-list" class="hidden">
-</div>
-
 <main class="board-wrap hidden">
   <div id="zoom-scale-display" style="">100%</div>
   <canvas id="board" aria-label="Drawing canvas"></canvas>
@@ -82,6 +89,7 @@
 </main>
 
 <script src="./app.js" type="module"></script>
+<!--<script src="./rooms.js" type="module"></script>-->
 <script type="module" src="./helper.js"></script>
 </body>
 </html>

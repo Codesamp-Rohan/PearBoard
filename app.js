@@ -2,25 +2,26 @@ import Hyperswarm from 'hyperswarm';
 import b4a from 'b4a';
 import crypto from 'hypercore-crypto';
 import {addAlphaToColor, getRandomColorPair} from "./helper.js";
-
 import Hypercore from 'hypercore';
 
-const PEAR_PATH = Pear.config.storage
+export const PEAR_PATH = Pear.config.storage
 
 // ============================================================================
-// HYPERCORE SAVE STATE SYSTEM
+// HYPERCORE SAVE STATE SYSTEM - FIXED VERSION
 // ============================================================================
 
-class HypercoreSaveManager {
+export class HypercoreSaveManager {
   static cores = new Map();
+  static replicationStreams = new Map();
 
   static async initCore(roomKey) {
     if (this.cores.has(roomKey)) {
       return this.cores.get(roomKey);
     }
 
+    console.log(PEAR_PATH + roomKey)
     try {
-      const core = new Hypercore(`${PEAR_PATH}/${roomKey}`, {
+      const core = new Hypercore(PEAR_PATH + roomKey, {
         valueEncoding: 'json'
       });
 
@@ -28,18 +29,19 @@ class HypercoreSaveManager {
       this.cores.set(roomKey, core);
 
       console.log('âœ… Hypercore initialized for room:', roomKey);
-      console.log('Core key:', core.key.toString('hex'));
+      console.log('ðŸ”‘ Core key:', core.key.toString('hex'));
+      console.log('ðŸ“Š Core length:', core.length);
 
       return core;
     } catch (error) {
-      console.error('Failed to initialize Hypercore:', error);
+      console.error('âŒ Failed to initialize Hypercore:', error);
       return null;
     }
   }
 
   static async saveDrawingState(roomKey) {
     if (!state.topicKey || !roomKey) {
-      console.warn('Cannot save: No active room');
+      console.warn('âš ï¸ Cannot save: No active room');
       return false;
     }
 
@@ -60,7 +62,10 @@ class HypercoreSaveManager {
       await core.append(drawingData);
 
       console.log('âœ… Drawing state saved to Hypercore for room:', roomKey);
-      console.log('Core length:', core.length);
+      this.logHypercoreData(drawingData, core.length - 1);
+
+      // Replicate to connected peers
+      this.replicateToAllPeers(roomKey);
 
       // Broadcast save notification
       NetworkManager.broadcast({
@@ -82,7 +87,7 @@ class HypercoreSaveManager {
     try {
       const core = await this.initCore(roomKey);
       if (!core || core.length === 0) {
-        console.log('No saved drawing found for room:', roomKey);
+        console.log('ðŸ“­ No saved drawing found for room:', roomKey);
         return false;
       }
 
@@ -91,24 +96,144 @@ class HypercoreSaveManager {
       const latestData = await core.get(latestIndex);
 
       if (!latestData || !latestData.objects || !latestData.order) {
-        console.warn('Invalid drawing data in Hypercore');
+        console.warn('âš ï¸ Invalid drawing data in Hypercore');
         return false;
       }
 
-      // Apply loaded state
-      state.doc.objects = { ...latestData.objects };
-      state.doc.order = [...latestData.order];
-      state.doc.version = latestData.version || 0;
+      console.log('âœ… Loading drawing from Hypercore for room:', roomKey);
+      this.logHypercoreData(latestData, latestIndex);
 
-      state.requestRender();
+      // Apply loaded state WITHOUT triggering render twice
+      this.applyDrawingState(latestData);
 
-      console.log('âœ… Loaded latest drawing from Hypercore for room:', roomKey);
-      console.log('Loaded', state.doc.order.length, 'objects from entry', latestIndex);
+      // Broadcast to other peers that we've loaded
+      NetworkManager.broadcast({
+        t: 'hypercore_loaded',
+        from: state.localPeerId,
+        roomKey: roomKey,
+        loadedVersion: latestData.version
+      });
+
+      NetworkManager.broadcast({
+        t: 'full',
+        snapshot: NetworkManager.serializeDocument()
+      });
+
+      console.log('📤 Broadcasted loaded drawing to all connected peers');
+
 
       return true;
     } catch (error) {
       console.error('âŒ Failed to load from Hypercore:', error);
       return false;
+    }
+  }
+
+  // FIXED: Apply drawing state without double rendering
+  static applyDrawingState(drawingData) {
+    // Temporarily disable render requests to prevent double rendering
+    const originalRequestRender = state.requestRender;
+    let renderRequested = false;
+
+    state.requestRender = () => {
+      renderRequested = true;
+    };
+
+    for (const id of drawingData.order) {
+      if (drawingData.objects[id] && !state.doc.objects[id]) {
+        // Only add objects that don't already exist
+        state.doc.objects[id] = drawingData.objects[id];
+        state.doc.order.push(id);
+      }
+    }
+
+    state.doc.version = Math.max(state.doc.version, drawingData.version || 0) + 1;
+
+    // Restore render function and trigger once if needed
+    state.requestRender = originalRequestRender;
+
+    if (renderRequested) {
+      state.requestRender();
+    }
+
+    console.log('ðŸŽ¨ Applied drawing state with', state.doc.order.length, 'objects');
+  }
+
+  // FIXED: Better logging for Hypercore data
+  static logHypercoreData(data, index = null) {
+    console.group(`ðŸ“Š Hypercore Data ${index !== null ? `(Entry ${index})` : ''}`);
+    console.log('ðŸ“ Version:', data.version);
+    console.log('ðŸ•’ Saved at:', new Date(data.savedAt).toLocaleString());
+    console.log('ðŸ‘¤ Saved by:', data.savedBy);
+    console.log('ðŸŽ¨ Objects count:', data.order?.length || 0);
+    console.log('ðŸ”‘ Room key:', data.roomKey?.substring(0, 8) + '...');
+
+    if (data.order && data.order.length > 0) {
+      console.log('ðŸ“‹ Object IDs:', data.order.slice(0, 5), data.order.length > 5 ? '...' : '');
+      console.log('ðŸ–Œï¸ Sample objects:');
+      data.order.slice(0, 3).forEach(id => {
+        const obj = data.objects[id];
+        if (obj) {
+          console.log(`  â€¢ ${id.substring(0, 6)}: ${obj.type} (${obj.color}, size: ${obj.size})`);
+        }
+      });
+      if (data.order.length > 3) {
+        console.log(`  ... and ${data.order.length - 3} more objects`);
+      }
+    }
+    console.groupEnd();
+  }
+
+  // NEW: Hypercore replication setup for peer synchronization
+  static setupReplication(roomKey, connection) {
+    const core = this.cores.get(roomKey);
+    if (!core || !connection.socket) return;
+
+    try {
+      const peerId = connection.peerId || 'unknown';
+      console.log(`ðŸ”— Setting up Hypercore replication for ${roomKey} with peer ${peerId}`);
+
+      // Create replication stream
+      const stream = core.replicate(false, { live: true });
+
+      // Store replication stream
+      this.replicationStreams.set(peerId, { stream, core, roomKey });
+
+      // Pipe the replication stream to the socket
+      connection.socket.pipe(stream).pipe(connection.socket, { end: false });
+
+      // Handle replication events
+      stream.on('sync', () => {
+        console.log(`ðŸ”„ Hypercore synced with peer ${peerId}`);
+        // Reload drawing after sync
+        setTimeout(() => {
+          this.loadLatestDrawing(roomKey);
+        }, 500);
+      });
+
+      stream.on('error', (err) => {
+        console.error(`âŒ Replication error with peer ${peerId}:`, err);
+        this.replicationStreams.delete(peerId);
+      });
+
+      // Clean up on connection close
+      connection.socket.on('close', () => {
+        this.replicationStreams.delete(peerId);
+        console.log(`ðŸ”Œ Replication stream closed for peer ${peerId}`);
+      });
+
+    } catch (error) {
+      console.error('âŒ Failed to setup Hypercore replication:', error);
+    }
+  }
+
+  // NEW: Replicate to all connected peers
+  static replicateToAllPeers(roomKey) {
+    for (const connection of state.connections) {
+      if (!connection.closed) {
+        console.log('REPLICATion : ', connection.peerId);
+        this.setupReplication(roomKey, connection);
+      }
     }
   }
 
@@ -120,8 +245,55 @@ class HypercoreSaveManager {
       return false;
     }
   }
-}
 
+  static async deleteDrawings(roomKey) {
+    try {
+      const core = await this.initCore(roomKey)
+      if(!core || core.length === 0) {
+        console.log('ðŸ“­ No saved drawing found for room:', roomKey);
+        return false;
+      }
+
+      await core.clear(roomKey)
+      console.log('ðŸ—‘ï¸ Cleared drawings for room:', roomKey);
+      return true;
+    } catch (e) {
+      console.error('âŒ Failed to clear the Hypercore of', roomKey, ':', e);
+      return false;
+    }
+  }
+
+  // NEW: Get all drawing history with better formatting
+  static async getDrawingHistory(roomKey) {
+    try {
+      const core = await this.initCore(roomKey);
+      if (!core || core.length === 0) {
+        console.log('ðŸ“­ No drawing history found for room:', roomKey);
+        return [];
+      }
+
+      const history = [];
+      for (let i = 0; i < core.length; i++) {
+        const entry = await core.get(i);
+        history.push({
+          index: i,
+          timestamp: new Date(entry.savedAt).toLocaleString(),
+          savedBy: entry.savedBy,
+          objectCount: entry.order?.length || 0,
+          version: entry.version
+        });
+      }
+
+      console.log('ðŸ“š Drawing history for room:', roomKey.substring(0, 8) + '...');
+      console.table(history);
+
+      return history;
+    } catch (error) {
+      console.error('âŒ Failed to get drawing history:', error);
+      return [];
+    }
+  }
+}
 
 // ============================================================================
 // CONSTANTS & CONFIGURATION
@@ -138,7 +310,7 @@ const CONFIG = {
 };
 
 // ============================================================================
-// GLOBAL STATE
+// GLOBAL STATE - FIXED VERSION
 // ============================================================================
 
 class AppState {
@@ -158,14 +330,13 @@ class AppState {
     this.touchPanning = false;
     this.showGrid = true;
     this.dirty = true;
-
     this.eraserPath = null;
+    this.renderPending = false; // FIXED: Prevent double renders
 
     // Object state
     this.activeId = null;
     this.hoverId = null;
     this.start = null;
-    // this.dragOffset = { x: 0, y: 0 };
     this.dragStart = null;
     this.dragInitialPos = null;
     this.tempShape = null;
@@ -211,8 +382,15 @@ class AppState {
     this.doc.version++;
   }
 
+  // FIXED: Prevent double rendering with debouncing
   requestRender() {
-    this.dirty = true;
+    if (this.renderPending) return;
+    this.renderPending = true;
+
+    requestAnimationFrame(() => {
+      this.dirty = true;
+      this.renderPending = false;
+    });
   }
 }
 
@@ -259,7 +437,7 @@ const ui = {
   peerNameInput: $('#username-input'),
   namePopup: $('#name--input--popup'),
 
-//   Canvas
+  // Canvas
   scaleDisplay: $('#zoom-scale-display'),
   opacitySlider: $('#opacity-control'),
 };
@@ -360,8 +538,8 @@ class CanvasManager {
     const rect = ui.canvas.getBoundingClientRect();
     const clientX = event.clientX - rect.left;
     const clientY = event.clientY - rect.top;
-    const newZoom = Math.min(CONFIG.MAX_ZOOM, Math.max(CONFIG.MIN_ZOOM, state.zoom * factor));
 
+    const newZoom = Math.min(CONFIG.MAX_ZOOM, Math.max(CONFIG.MIN_ZOOM, state.zoom * factor));
     const worldX = (clientX - state.panX) / state.zoom;
     const worldY = (clientY - state.panY) / state.zoom;
 
@@ -378,7 +556,6 @@ class CanvasManager {
 
     this.clampPan();
     state.requestRender();
-
     CursorManager.handleCanvasTransform();
   }
 
@@ -391,6 +568,9 @@ class CanvasManager {
   }
 
   static renderFrame() {
+    if (!state.dirty) return;
+    state.dirty = false;
+
     if (state.tool === 'eraser' && state.eraserPath && state.eraserPath.length > 0) {
       // Render eraser preview
       state.ctx.save();
@@ -398,7 +578,6 @@ class CanvasManager {
       state.ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
       state.ctx.lineWidth = state.strokeSize;
       state.ctx.lineCap = 'round';
-
       state.ctx.beginPath();
       state.ctx.moveTo(state.eraserPath[0].x, state.eraserPath[0].y);
       for (let i = 1; i < state.eraserPath.length; i++) {
@@ -407,6 +586,7 @@ class CanvasManager {
       state.ctx.stroke();
       state.ctx.restore();
     }
+
     // Clear canvas
     state.ctx.setTransform(1, 0, 0, 1, 0, 0);
     state.ctx.clearRect(0, 0, ui.canvas.width, ui.canvas.height);
@@ -563,18 +743,15 @@ class ObjectRenderer {
 
   static renderObject(obj) {
     if (obj.type === 'eraser') return;
+
     state.ctx.save();
     const strokeWidth = (obj.strokeWidth ?? 2) / state.zoom;
     state.ctx.lineWidth = obj.size;
     state.ctx.lineCap = 'round';
     state.ctx.lineJoin = 'round';
-    // state.ctx.strokeStyle = obj.type === 'eraser' ? state.ctx.globalCompositeOperation = "destination-out" : obj.color;
 
     if (obj.type === "eraser") {
-      // state.ctx.globalCompositeOperation = "destination-out";
-      // state.ctx.strokeStyle = "rgba(0,0,0,1)";
-      // state.ctx.fillStyle = "rgba(0,0,0,1)";
-      return
+      return;
     } else {
       state.ctx.globalCompositeOperation = "source-over";
       const alpha = typeof obj.opacity === 'number' ? obj.opacity : 1;
@@ -622,8 +799,8 @@ class ObjectRenderer {
     for (let i = 1; i < points.length; i++) {
       state.ctx.lineTo(points[i].x, points[i].y);
     }
-
     state.ctx.stroke();
+
     if (obj.type === 'eraser') {
       state.ctx.globalCompositeOperation = 'source-over';
     }
@@ -762,6 +939,7 @@ class GeometryUtils {
     const width = Math.max(10, metrics.width);
     const height = Math.max(16, metrics.actualBoundingBoxAscent + metrics.actualBoundingBoxDescent || 20);
     state.ctx.restore();
+
     return { x: obj.x, y: obj.y, w: width, h: height };
   }
 
@@ -779,10 +957,12 @@ class GeometryUtils {
 class DrawingTools {
   static selectTool(toolName) {
     state.tool = toolName;
+
     // Update UI
     [...ui.tools.querySelectorAll('.btn')].forEach(button => {
       button.classList.toggle('active', button.dataset.tool === toolName);
     });
+
     TextEditor.close(true);
   }
 
@@ -824,6 +1004,7 @@ class DrawingTools {
     obj.rev++;
     state.bumpDoc();
     state.requestRender();
+
     NetworkManager.queueOperation({ t: 'patch', id, path: 'points', push: { x, y } });
   }
 
@@ -910,11 +1091,10 @@ class DrawingTools {
 
     const unitX = dx / length;
     const unitY = dy / length;
-
     const toPointX = center.x - p1.x;
     const toPointY = center.y - p1.y;
-
     const dot = toPointX * unitX + toPointY * unitY;
+
     const closestPoint = {
       x: p1.x + Math.max(0, Math.min(length, dot)) * unitX,
       y: p1.y + Math.max(0, Math.min(length, dot)) * unitY
@@ -926,7 +1106,6 @@ class DrawingTools {
 
     return distance <= radius;
   }
-
 
   static finishStroke(id) {
     if (!id) return;
@@ -1229,19 +1408,17 @@ class HistoryManager {
     if (!entry) return;
 
     switch (entry.t) {
-      case 'del': // Undo add Ã¢â€ â€™ delete
+      case 'del': // Undo add â†’ delete
         const obj = state.doc.objects[entry.id];
         if (obj) {
           DocumentManager.deleteObject(entry.id, false);
           state.redoStack.push({ t: 'add', obj: entry.before });
         }
         break;
-
-      case 'add': // Undo delete Ã¢â€ â€™ add
+      case 'add': // Undo delete â†’ add
         DocumentManager.addObject(entry.obj, false);
         state.redoStack.push({ t: 'del', id: entry.obj.id, before: entry.obj });
         break;
-
       case 'update':
         state.doc.objects[entry.id] = entry.before;
         state.bumpDoc();
@@ -1249,7 +1426,6 @@ class HistoryManager {
         NetworkManager.queueOperation({ t: 'update', id: entry.id, patch: entry.before });
         state.redoStack.push({ t: 'update', id: entry.id, before: entry.after, after: entry.before });
         break;
-
       case 'restore':
         const currentSnapshot = JSON.stringify(state.doc);
         Object.assign(state.doc, JSON.parse(entry.snapshot));
@@ -1269,11 +1445,9 @@ class HistoryManager {
       case 'add':
         DocumentManager.addObject(entry.obj, true);
         break;
-
       case 'update':
         DocumentManager.updateObject(entry.id, entry.after, true);
         break;
-
       case 'restore':
         const currentSnapshot = JSON.stringify(state.doc);
         Object.assign(state.doc, JSON.parse(entry.snapshot));
@@ -1406,9 +1580,9 @@ class InputHandler {
     if (['pen', 'eraser'].includes(state.tool)) {
       DrawingTools.finishStroke(state.activeId);
     }
+
     state.activeId = null;
   }
-
 
   static handleDoubleClick(event) {
     const coords = CoordinateUtils.toCanvas(event);
@@ -1443,12 +1617,10 @@ class InputHandler {
   static startDragging(objectId, coords) {
     state.activeId = objectId;
     state.isDragging = true;
-
     const obj = state.doc.objects[objectId];
     if (!obj) return;
 
     state.dragStart = { x: coords.x, y: coords.y };
-
     if (obj.points) {
       const bounds = GeometryUtils.getBounds(obj);
       state.dragInitialPos = { x: bounds.x, y: bounds.y };
@@ -1458,7 +1630,6 @@ class InputHandler {
 
     console.log('Starting drag:', { objectId, coords, initialPos: state.dragInitialPos });
   }
-
 
   static startDrawing(coords) {
     state.drawing = true;
@@ -1496,7 +1667,6 @@ class InputHandler {
 
     const deltaX = coords.x - state.dragStart.x;
     const deltaY = coords.y - state.dragStart.y;
-
     const newX = state.dragInitialPos.x + deltaX;
     const newY = state.dragInitialPos.y + deltaY;
 
@@ -1543,7 +1713,6 @@ class InputHandler {
     const rect = ui.canvas.getBoundingClientRect();
     const clientX = event.clientX - rect.left;
     const clientY = event.clientY - rect.top;
-
     const deltaX = clientX - state.lastCX;
     const deltaY = clientY - state.lastCY;
 
@@ -1554,7 +1723,6 @@ class InputHandler {
 
     CanvasManager.clampPan();
     state.requestRender();
-
     CursorManager.handleCanvasTransform();
   }
 
@@ -1611,9 +1779,9 @@ class CursorManager {
     // Smoothing configuration
     this.smoothingConfig = {
       easingFactor: 0.15, // Lower = smoother, higher = more responsive
-      velocityDecay: 0.8,  // Velocity decay for natural movement
-      minDistance: 1,      // Minimum distance to trigger movement
-      maxVelocity: 50      // Maximum velocity per frame
+      velocityDecay: 0.8, // Velocity decay for natural movement
+      minDistance: 1, // Minimum distance to trigger movement
+      maxVelocity: 50 // Maximum velocity per frame
     };
 
     document.addEventListener("mousemove", (event) => {
@@ -1644,6 +1812,7 @@ class CursorManager {
     if (now - this.lastBroadcast < this.broadcastThrottle) {
       return;
     }
+
     this.lastBroadcast = now;
 
     // Convert to world coordinates for broadcasting
@@ -1695,6 +1864,7 @@ class CursorManager {
         visible: true,
         lastFrameTime: now
       };
+
       this.cursors.set(peerId, cursorData);
     } else {
       // Calculate new target position
@@ -1791,7 +1961,6 @@ class CursorManager {
     const rect = ui.canvas.getBoundingClientRect();
     const canvasX = screenX - rect.left;
     const canvasY = screenY - rect.top;
-
     return {
       x: (canvasX - state.panX) / state.zoom,
       y: (canvasY - state.panY) / state.zoom
@@ -1803,7 +1972,6 @@ class CursorManager {
     const rect = ui.canvas.getBoundingClientRect();
     const canvasX = worldX * state.zoom + state.panX;
     const canvasY = worldY * state.zoom + state.panY;
-
     return {
       x: canvasX + rect.left,
       y: canvasY + rect.top
@@ -1843,6 +2011,7 @@ class CursorManager {
 
     element.textContent = peerName || `Peer-${peerId}`;
     document.body.appendChild(element);
+
     return element;
   }
 
@@ -1874,6 +2043,7 @@ class CursorManager {
       // Fade out before removing
       cursorData.element.style.transition = 'opacity 200ms ease-out';
       cursorData.element.style.opacity = '0';
+
       setTimeout(() => {
         if (cursorData.element && cursorData.element.parentNode) {
           cursorData.element.parentNode.removeChild(cursorData.element);
@@ -1928,6 +2098,7 @@ class CursorManager {
         cursorData.element.parentNode.removeChild(cursorData.element);
       }
     }
+
     this.cursors.clear();
   }
 }
@@ -2038,6 +2209,7 @@ class UIManager {
     link.click();
     URL.revokeObjectURL(dataUrl);
   }
+
   static async saveDrawingState() {
     if (!state.topicKey) {
       alert('No active room to save to');
@@ -2050,13 +2222,12 @@ class UIManager {
       // Show visual feedback
       ui.saveState.textContent = 'âœ…';
       setTimeout(() => {
-        ui.saveState.textContent = 'ðŸ’¾';
+        ui.saveState.textContent = 'ðŸ’¾ Save State';
       }, 2000);
     } else {
       alert('âŒ Failed to save drawing state');
     }
   }
-
 
   static showSetup() {
     ui.setup.classList.remove('hidden');
@@ -2092,6 +2263,7 @@ class SessionManager {
 
     state.joined = true;
     state.topicKey = topicHex;
+
     UIManager.showLoading();
     ui.topicOut.dataset.value = topicHex;
 
@@ -2100,25 +2272,20 @@ class SessionManager {
       UIManager.showWorkspace();
       CanvasManager.resizeCanvas();
 
-      // AUTO-LOAD: Try to load saved drawing from Hypercore
-      setTimeout(async () => {
-        try {
-          const hasDrawings = await HypercoreSaveManager.hasDrawings(topicHex);
-          if (hasDrawings) {
-            const loaded = await HypercoreSaveManager.loadLatestDrawing(topicHex);
-            if (loaded) {
-              console.log('ðŸŽ¨ Auto-loaded saved drawing for room:', topicHex);
-              // Broadcast loaded state to other peers
-              NetworkManager.broadcast({
-                t: 'full',
-                snapshot: NetworkManager.serializeDocument()
-              });
-            }
-          }
-        } catch (error) {
-          console.error('Failed to auto-load drawing:', error);
-        }
-      }, 1000); // Wait for network to stabilize
+      // Try to auto-load saved drawing after network stabilizes
+      // setTimeout(async () => {
+      //   try {
+      //     const hasDrawings = await HypercoreSaveManager.hasDrawings(topicHex);
+      //     if (hasDrawings) {
+      //       const loaded = await HypercoreSaveManager.loadLatestDrawing(topicHex);
+      //       if (loaded) {
+      //         console.log('ðŸŽ¨ Auto-loaded saved drawing for room:', topicHex.substring(0, 8) + '...');
+      //       }
+      //     }
+      //   } catch (error) {
+      //     console.error('Failed to auto-load drawing:', error);
+      //   }
+      // }, 2000); // Wait for network to stabilize
 
     } catch (error) {
       console.error('Failed to start networking:', error);
@@ -2129,7 +2296,7 @@ class SessionManager {
 }
 
 // ============================================================================
-// NETWORK MANAGEMENT
+// NETWORK MANAGEMENT - FIXED VERSION
 // ============================================================================
 
 class NetworkManager {
@@ -2146,14 +2313,25 @@ class NetworkManager {
   }
 
   static setupConnection(socket) {
+    const peerId = crypto.randomBytes(4).toString('hex');
     const connection = {
       socket: socket,
+      peerId: peerId,
       closed: false
     };
 
     state.connections.add(connection);
     state.peerCount = state.connections.size;
     UIManager.updatePeerCount(state.peerCount);
+
+    console.log(`ðŸ”— New peer connected: ${peerId}`);
+
+    // Setup Hypercore replication for this peer
+    if (state.topicKey) {
+      setTimeout(() => {
+        HypercoreSaveManager.setupReplication(state.topicKey, connection);
+      }, 1000); // Wait for connection to stabilize
+    }
 
     // Send initial hello with current document
     this.safeSend(connection, {
@@ -2174,6 +2352,7 @@ class NetworkManager {
       state.connections.delete(connection);
       state.peerCount = state.connections.size;
       UIManager.updatePeerCount(state.peerCount);
+      console.log(`ðŸ”Œ Peer disconnected: ${peerId}`);
     });
 
     socket.once('error', () => {
@@ -2247,51 +2426,45 @@ class NetworkManager {
   static handleRemoteMessage(message) {
     switch (message.t) {
       case 'hello':
+        console.log(`ðŸ‘‹ Hello from peer: ${message.from}`);
         this.applySnapshot(message.doc);
         // Reply with our version if we're ahead
         if (state.doc.version > (message.doc?.version ?? -1)) {
           this.broadcast({ t: 'full', snapshot: this.serializeDocument() });
         }
         break;
-
       case 'full':
         this.applySnapshot(message.snapshot);
         break;
-
       case 'add':
         this.handleAddMessage(message);
         break;
-
       case 'update':
         this.handleUpdateMessage(message);
         break;
-
       case 'patch':
         this.handlePatchMessage(message);
         break;
-
       case 'touch':
         this.handleTouchMessage(message);
         break;
-
       case 'move':
         this.handleMoveMessage(message);
         break;
-
       case 'delete':
         this.handleDeleteMessage(message);
         break;
-
       case 'clear':
         DocumentManager.clearAll(false);
         break;
-
       case 'cursor':
         this.handleCursorMessage(message);
         break;
-
       case 'hypercore_saved':
-        console.log('ðŸ“ Peer', message.from, 'saved drawing to Hypercore at', new Date(message.savedAt));
+        console.log('ðŸ“‚ Peer', message.from, 'saved drawing to Hypercore at', new Date(message.savedAt));
+        break;
+      case 'hypercore_loaded':
+        console.log('ðŸ“‚ Peer', message.from, 'loaded drawing from Hypercore, version:', message.loadedVersion);
         break;
     }
   }
@@ -2400,7 +2573,6 @@ class NetworkManager {
     );
   }
 
-
   static encode(object) {
     return b4a.from(JSON.stringify(object));
   }
@@ -2419,10 +2591,14 @@ class NetworkManager {
 // ============================================================================
 
 class WhiteboardApp {
-  static init() {
-    console.log('Initializing P2P Collaborative Whiteboard...');
-    console.log('Local Peer ID:', state.localPeerId);
+  static initialiszed = false
 
+  static init() {
+    console.log('ðŸŽ¨ Initializing P2P Collaborative Whiteboard...');
+    console.log('Local Peer ID:', state.localPeerId);
+    if(this.initialiszed) return;
+    this.initialiszed = true;
+    initializeRoomList()
     // Initialize all managers
     CanvasManager.init();
     InputHandler.init();
@@ -2437,7 +2613,7 @@ class WhiteboardApp {
     // Show setup screen
     UIManager.showSetup();
 
-    console.log('Whiteboard application initialized successfully');
+    console.log('âœ… Whiteboard application initialized successfully');
   }
 }
 
@@ -2449,16 +2625,99 @@ document.addEventListener('DOMContentLoaded', () => {
   WhiteboardApp.init();
 });
 
+// Enhanced room key copying
 ui.canvasRoomKey.addEventListener('click', () => {
   const textToCopy = ui.topicOut.getAttribute('data-value')
   if(navigator.clipboard) {
     navigator.clipboard.writeText(textToCopy).then(() => {
-      alert('Copied to clipboard!');
+      alert('Room key copied to clipboard! ðŸ“‹');
     }).catch(err => {
       console.error('Failed to copy: ', err);
     });
   }
 })
+
+// Enhanced load state button with better feedback
+document.querySelector('.load-state-btn').addEventListener('click', async () => {
+  const roomKey = ui.topicOut.getAttribute('data-value');
+  console.log('ðŸ”„ Loading drawing state for room:', roomKey);
+
+  const success = await HypercoreSaveManager.loadLatestDrawing(roomKey);
+  if (success) {
+    alert('âœ… Drawing loaded successfully!');
+    // Show drawing history
+    HypercoreSaveManager.getDrawingHistory(roomKey);
+  } else {
+    alert('âš ï¸ No saved drawing found or failed to load');
+  }
+});
+
+
+
+
+import fs from 'fs';
+import path from 'path';
+
+export function initializeRoomList() {
+  function loadRooms(callback) {
+    fs.readdir(PEAR_PATH, (err, items) => {
+      if (err) {
+        console.error('Failed to read rooms directory:', err);
+        callback([]);
+        return;
+      }
+      const folders = items.filter(item =>
+          fs.statSync(path.join(PEAR_PATH, item)).isDirectory()
+      );
+      console.log(folders);
+      callback(folders);
+    });
+  }
+
+  loadRooms(folders => {
+    const peersList = document.getElementById('peers-list');
+    if (!peersList) return;
+
+    if (!folders.length) {
+      peersList.innerHTML = `<p>No rooms found.</p>`;
+    } else {
+      peersList.innerHTML = `
+        <ul>
+          ${folders.map(name => `<li>${name}</li>`).join('')}
+        </ul>
+      `;
+    }
+  });
+}
+
+
+// Enhanced room management
+document.getElementById('delete-state').addEventListener('click', async () => {
+  const roomKey = document.getElementById('canvas-topic').getAttribute('data-value');
+  if (!roomKey) {
+    alert('No active room to delete');
+    return;
+  }
+
+  const confirmDelete = confirm(`Are you sure you want to delete all drawings in room "${roomKey}"?`);
+  if (confirmDelete) {
+    const success = await HypercoreSaveManager.deleteDrawings(roomKey);
+    if (success) {
+      alert('âœ… Room drawings deleted successfully');
+      location.reload(); // Refresh the room list
+    } else {
+      alert('âŒ Failed to delete room drawings');
+    }
+  }
+});
+
+// Add room history viewer
+function showRoomHistory(roomKey) {
+  HypercoreSaveManager.getDrawingHistory(roomKey);
+}
+
+const version = JSON.parse(fs.readFileSync('./package.json', 'utf8')).version
+    document.querySelector('#version').innerHTML = version;
 
 // Export for potential external use
 if (typeof module !== 'undefined' && module.exports) {
@@ -2469,6 +2728,7 @@ if (typeof module !== 'undefined' && module.exports) {
     DrawingTools,
     DocumentManager,
     NetworkManager,
-    UIManager
+    UIManager,
+    HypercoreSaveManager
   };
 }
