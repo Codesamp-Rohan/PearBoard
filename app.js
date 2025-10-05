@@ -1,7 +1,7 @@
 import Hyperswarm from 'hyperswarm';
 import b4a from 'b4a';
 import crypto from 'hypercore-crypto';
-import {addAlphaToColor, getRandomColorPair} from "./src/utils/helper.js";
+import { addAlphaToColor, getRandomColorPair } from "./src/utils/helper.js";
 import Hypercore from 'hypercore';
 
 export const PEAR_PATH = Pear.config.storage
@@ -21,7 +21,7 @@ class HypercoreSaveManager {
 
     console.log(PEAR_PATH + roomKey)
     try {
-      const core = new Hypercore(PEAR_PATH + roomKey, {
+      const core = new Hypercore(PEAR_PATH + state.peerId + roomKey, {
         valueEncoding: 'json'
       });
 
