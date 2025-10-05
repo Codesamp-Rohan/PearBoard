@@ -8,9 +8,27 @@
 </head>
 <body>
 <p class="drag-msg">Use <b>shift</b> to drag</p>
+<button id="state-details" type="button">!</button>
+
+<!--Authentication-->
+<div id="auth-container">
+  <div id="auth-form">
+    <input id="auth-input" type="text" placeholder="Enter your name" />
+    <input type="password" name="password" id="auth-pass" placeholder="Enter your password">
+    <div style="display: flex; flex-direction: row; gap: 4px; width: 100%">
+    <button style="width: 100%" id="auth-signin" type="button">SignIn</button>
+    <button style="width: 100%"  id="auth-signup" type="button">SignUp</button>
+    </div>
+  </div>
+</div>
+
+<!--Floaters-->
 <div class="left-top-data">
   <button class="load-state-btn" type="button">
     <p>💾 Load State</p>
+  </button>
+  <button class="slide-state-btn" type="button">
+    <p>💾 Slide State</p>
   </button>
   <button class="canvas-room-key hidden" type="button">
     <p>Canvas Topic</p><p id="canvas-topic"></p><img class="icon" src="./assets/copy.png" alt="copy-img">
@@ -33,7 +51,7 @@
   <pear-ctrl></pear-ctrl>
   <p id="version"></p>
 </div>
-<div id="setup">
+<div id="setup" style="z-index: 999;">
   <div id="peers-list-container">
     <h5 style="padding: 0 8px">Saved Canvas History</h5>
   <div id="peers-list" class="">
@@ -83,13 +101,13 @@
 </header>
 
 <main class="board-wrap hidden">
+  <div id="slide-state-container"></div>
   <div id="zoom-scale-display" style="">100%</div>
   <canvas id="board" aria-label="Drawing canvas"></canvas>
   <p id="mouse-follower">You</p>
 </main>
 
-<script src="./app.js" type="module"></script>
-<!--<script src="./rooms.js" type="module"></script>-->
-<script type="module" src="./helper.js"></script>
+<script src="/src/app/index.js" type="module"></script>
+<script type="module" src="src/utils/helper.js"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 import Hyperswarm from 'hyperswarm';
 import b4a from 'b4a';
 import crypto from 'hypercore-crypto';
-import {addAlphaToColor, getRandomColorPair} from "./helper.js";
+import {addAlphaToColor, getRandomColorPair} from "./src/utils/helper.js";
 import Hypercore from 'hypercore';
 
 export const PEAR_PATH = Pear.config.storage
@@ -10,7 +10,7 @@ export const PEAR_PATH = Pear.config.storage
 // HYPERCORE SAVE STATE SYSTEM - FIXED VERSION
 // ============================================================================
 
-export class HypercoreSaveManager {
+class HypercoreSaveManager {
   static cores = new Map();
   static replicationStreams = new Map();
 
@@ -315,7 +315,7 @@ const CONFIG = {
 
 class AppState {
   constructor() {
-    this.localPeerId = this.generateRandomId();
+    this.localPeerId = null;
     this.peerName = '';
     this.zoom = 1;
     this.panX = 0;
@@ -394,7 +394,7 @@ class AppState {
   }
 }
 
-const state = new AppState();
+export const state = new AppState();
 
 // ============================================================================
 // DOM UTILITIES
@@ -402,7 +402,7 @@ const state = new AppState();
 
 const $ = (selector) => document.querySelector(selector);
 
-const ui = {
+export const ui = {
   // Session elements
   mouse: $('#mouse-follower'),
   setup: $('#setup'),
@@ -950,6 +950,7 @@ class GeometryUtils {
   }
 }
 
+console.log('Local Peer ID : ', state.localPeerId)
 // ============================================================================
 // DRAWING TOOLS
 // ============================================================================
@@ -2189,6 +2190,7 @@ class UIManager {
 
   static updateLocalPeerDisplay() {
     ui.localPeerName.innerHTML = state.localPeerId;
+    console.log('All State : ', this.state)
   }
 
   static updatePeerCount(count) {
@@ -2593,9 +2595,10 @@ class NetworkManager {
 class WhiteboardApp {
   static initialiszed = false
 
-  static init() {
+  static async init() {
     console.log('ðŸŽ¨ Initializing P2P Collaborative Whiteboard...');
     console.log('Local Peer ID:', state.localPeerId);
+    state.localPeerId = await initAuth()
     if(this.initialiszed) return;
     this.initialiszed = true;
     initializeRoomList()
@@ -2657,6 +2660,7 @@ document.querySelector('.load-state-btn').addEventListener('click', async () => 
 
 import fs from 'fs';
 import path from 'path';
+import {initAuth} from "./Auth/auth.js";
 
 export function initializeRoomList() {
   function loadRooms(callback) {
@@ -2717,7 +2721,11 @@ function showRoomHistory(roomKey) {
 }
 
 const version = JSON.parse(fs.readFileSync('./package.json', 'utf8')).version
-    document.querySelector('#version').innerHTML = version;
+document.querySelector('#version').innerHTML = version;
+
+document.querySelector('#state-details').addEventListener('click', () => {
+  console.log(state)
+})
 
 // Export for potential external use
 if (typeof module !== 'undefined' && module.exports) {

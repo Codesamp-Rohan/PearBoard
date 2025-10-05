@@ -213,6 +213,18 @@ p {
   padding: 12px;
 }
 
+#slide-state-container {
+  width: 30vw;
+  height: 100%;
+  position: fixed;
+  top: 128px;
+  right: 0;
+  z-index: 100;
+  background-color: #f8f9fa;
+  border-right: 3px solid var(--muted);
+  padding: 12px;
+}
+
 ul{
   padding: 12px 0;
   display: flex;
@@ -281,6 +293,36 @@ li:hover{background:var(--list-active)}
 }
 
 #peer-count-btn {
+  border: 1px solid var(--muted);
+  box-shadow: 0 10px 10px #ddd;
+}
+
+#auth-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: fixed;
+  background: #f8f9fa;
+  z-index: 1000;
+}
+#auth-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+#state-details {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  z-index: 1001;
+  font-size: 12px;
+  padding: 4px 16px;
+  border-radius: 8px;
   border: 1px solid var(--muted);
   box-shadow: 0 10px 10px #ddd;
 }
