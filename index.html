@@ -16,8 +16,8 @@
     <input id="auth-input" type="text" placeholder="Enter your name" />
     <input type="password" name="password" id="auth-pass" placeholder="Enter your password">
     <div style="display: flex; flex-direction: row; gap: 4px; width: 100%">
-    <button style="width: 100%" id="auth-signin" type="button">SignIn</button>
-    <button style="width: 100%"  id="auth-signup" type="button">SignUp</button>
+    <button style="width: 100%" id="auth-signin" type="button">Board In</button>
+    <button style="width: 100%"  id="auth-signup" type="button">Board Up</button>
     </div>
   </div>
 </div>
@@ -49,7 +49,7 @@
 </div>
 <div id="titlebar">
   <pear-ctrl></pear-ctrl>
-  <p id="version"></p>
+  <p id="version">1.0.3</p>
 </div>
 <div id="setup" style="z-index: 999;">
   <div id="peers-list-container">
@@ -86,7 +86,7 @@
     <button id="redo" class="btn" title="Redo (Ctrl/Cmd+Shift+Z)">↷</button>
     <button id="clear" class="btn" title="Clear">🗑️</button>
     <button id="save" class="btn" title="Save PNG">💾</button>
-    <button id="save-state" class="btn" title="Save State">💾 💾</button>
+    <button id="save-state" class="btn" title="Save State">Save State</button>
     <button id="delete-state" class="btn" title="Delete State">❌</button>
   </div>
   </div>
@@ -108,6 +108,5 @@
 </main>
 
 <script src="/app.js" type="module"></script>
-<script type="module" src="src/utils/helper.js"></script>
 </body>
 </html>

@@ -59,8 +59,9 @@ button, input, h4 {
   border-radius: 50px;
   border: 1px solid var(--muted);
   background: var(--btn);
-  font-size: 1rem;
+  font-size: 12px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 #setup, #loading {

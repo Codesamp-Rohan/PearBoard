@@ -1,8 +1,13 @@
 import Hyperswarm from 'hyperswarm';
 import b4a from 'b4a';
 import crypto from 'hypercore-crypto';
-import { addAlphaToColor, getRandomColorPair } from "./src/utils/helper.js";
+import { addAlphaToColor, getRandomColorPair } from "./helper.js";
 import Hypercore from 'hypercore';
+import { initAuth } from "./Auth/auth.js";
+
+// For folder logging
+import fs from 'fs';
+import path from 'path';
 
 export const PEAR_PATH = Pear.config.storage
 
@@ -10,7 +15,7 @@ export const PEAR_PATH = Pear.config.storage
 // HYPERCORE SAVE STATE SYSTEM - FIXED VERSION
 // ============================================================================
 
-class HypercoreSaveManager {
+class HypercoreManager {
   static cores = new Map();
   static replicationStreams = new Map();
 
@@ -19,29 +24,29 @@ class HypercoreSaveManager {
       return this.cores.get(roomKey);
     }
 
-    console.log(PEAR_PATH + roomKey)
+    console.log(PEAR_PATH + state.localPeerId + roomKey)
     try {
-      const core = new Hypercore(PEAR_PATH + state.peerId + roomKey, {
+      const core = new Hypercore(`${PEAR_PATH}/${state.localPeerId}/${roomKey}`, {
         valueEncoding: 'json'
       });
 
       await core.ready();
       this.cores.set(roomKey, core);
 
-      console.log('âœ… Hypercore initialized for room:', roomKey);
-      console.log('ðŸ”‘ Core key:', core.key.toString('hex'));
-      console.log('ðŸ“Š Core length:', core.length);
+      console.log('Hypercore initialized for room:', roomKey);
+      console.log('Core key:', core.key.toString('hex'));
+      console.log('Core length:', core.length);
 
       return core;
     } catch (error) {
-      console.error('âŒ Failed to initialize Hypercore:', error);
+      console.error('Failed to initialize Hypercore:', error);
       return null;
     }
   }
 
   static async saveDrawingState(roomKey) {
     if (!state.topicKey || !roomKey) {
-      console.warn('âš ï¸ Cannot save: No active room');
+      console.warn('Cannot save: No active room');
       return false;
     }
 
@@ -58,16 +63,13 @@ class HypercoreSaveManager {
         roomKey: roomKey
       };
 
-      // Append to hypercore (latest entry = current state)
       await core.append(drawingData);
 
-      console.log('âœ… Drawing state saved to Hypercore for room:', roomKey);
+      console.log('Drawing state saved to Hypercore for room:', roomKey);
       this.logHypercoreData(drawingData, core.length - 1);
 
-      // Replicate to connected peers
       this.replicateToAllPeers(roomKey);
 
-      // Broadcast save notification
       NetworkManager.broadcast({
         t: 'hypercore_saved',
         from: state.localPeerId,
@@ -78,7 +80,7 @@ class HypercoreSaveManager {
 
       return true;
     } catch (error) {
-      console.error('âŒ Failed to save to Hypercore:', error);
+      console.error('Failed to save to Hypercore:', error);
       return false;
     }
   }
@@ -159,7 +161,125 @@ class HypercoreSaveManager {
     console.log('ðŸŽ¨ Applied drawing state with', state.doc.order.length, 'objects');
   }
 
-  // FIXED: Better logging for Hypercore data
+
+  static async saveDrawingState(roomKey) {
+    if (!state.topicKey || !roomKey) {
+      console.warn('Cannot save: No active room');
+      return false;
+    }
+
+    try {
+      const core = await this.initCore(roomKey);
+      if (!core) return false;
+
+      const drawingData = {
+        version: state.doc.version,
+        order: [...state.doc.order],
+        objects: { ...state.doc.objects },
+        savedAt: Date.now(),
+        savedBy: state.localPeerId,
+        roomKey: roomKey
+      };
+
+      await core.append(drawingData);
+
+      console.log('Drawing state saved to Hypercore for room:', roomKey);
+      this.logHypercoreData(drawingData, core.length - 1);
+
+      this.replicateToAllPeers(roomKey);
+
+      NetworkManager.broadcast({
+        t: 'hypercore_saved',
+        from: state.localPeerId,
+        roomKey: roomKey,
+        savedAt: drawingData.savedAt,
+        coreLength: core.length
+      });
+
+      return true;
+    } catch (error) {
+      console.error('Failed to save to Hypercore:', error);
+      return false;
+    }
+  }
+
+  static async loadLatestDrawing(roomKey) {
+    try {
+      const core = await this.initCore(roomKey);
+      if (!core || core.length === 0) {
+        console.log('ðŸ“­ No saved drawing found for room:', roomKey);
+        return false;
+      }
+
+      // Get the latest entry (last item in hypercore)
+      const latestIndex = core.length - 1;
+      const latestData = await core.get(latestIndex);
+
+      if (!latestData || !latestData.objects || !latestData.order) {
+        console.warn('âš ï¸ Invalid drawing data in Hypercore');
+        return false;
+      }
+
+      console.log('âœ… Loading drawing from Hypercore for room:', roomKey);
+      this.logHypercoreData(latestData, latestIndex);
+
+      // Apply loaded state WITHOUT triggering render twice
+      this.applyDrawingState(latestData);
+
+      // Broadcast to other peers that we've loaded
+      NetworkManager.broadcast({
+        t: 'hypercore_loaded',
+        from: state.localPeerId,
+        roomKey: roomKey,
+        loadedVersion: latestData.version
+      });
+
+      NetworkManager.broadcast({
+        t: 'full',
+        snapshot: NetworkManager.serializeDocument()
+      });
+
+      console.log('📤 Broadcasted loaded drawing to all connected peers');
+
+
+      return true;
+    } catch (error) {
+      console.error('âŒ Failed to load from Hypercore:', error);
+      return false;
+    }
+  }
+
+// FIXED: Apply drawing state without double rendering
+  static applyDrawingState(drawingData) {
+    // Temporarily disable render requests to prevent double rendering
+    const originalRequestRender = state.requestRender;
+    let renderRequested = false;
+
+    state.requestRender = () => {
+      renderRequested = true;
+    };
+
+    for (const id of drawingData.order) {
+      if (drawingData.objects[id] && !state.doc.objects[id]) {
+        // Only add objects that don't already exist
+        state.doc.objects[id] = drawingData.objects[id];
+        state.doc.order.push(id);
+      }
+    }
+
+    state.doc.version = Math.max(state.doc.version, drawingData.version || 0) + 1;
+
+    // Restore render function and trigger once if needed
+    state.requestRender = originalRequestRender;
+
+    if (renderRequested) {
+      state.requestRender();
+    }
+
+    console.log('ðŸŽ¨ Applied drawing state with', state.doc.order.length, 'objects');
+  }
+
+// FIXED: Better logging for Hypercore data
   static logHypercoreData(data, index = null) {
     console.group(`ðŸ“Š Hypercore Data ${index !== null ? `(Entry ${index})` : ''}`);
     console.log('ðŸ“ Version:', data.version);
@@ -184,7 +304,7 @@ class HypercoreSaveManager {
     console.groupEnd();
   }
 
-  // NEW: Hypercore replication setup for peer synchronization
+// NEW: Hypercore replication setup for peer synchronization
   static setupReplication(roomKey, connection) {
     const core = this.cores.get(roomKey);
     if (!core || !connection.socket) return;
@@ -227,7 +347,7 @@ class HypercoreSaveManager {
     }
   }
 
-  // NEW: Replicate to all connected peers
+// NEW: Replicate to all connected peers
   static replicateToAllPeers(roomKey) {
     for (const connection of state.connections) {
       if (!connection.closed) {
@@ -258,17 +378,17 @@ class HypercoreSaveManager {
       console.log('ðŸ—‘ï¸ Cleared drawings for room:', roomKey);
       return true;
     } catch (e) {
-      console.error('âŒ Failed to clear the Hypercore of', roomKey, ':', e);
+      console.error('Failed to clear the Hypercore of', roomKey, ':', e);
       return false;
     }
   }
 
-  // NEW: Get all drawing history with better formatting
+// NEW: Get all drawing history with better formatting
   static async getDrawingHistory(roomKey) {
     try {
       const core = await this.initCore(roomKey);
       if (!core || core.length === 0) {
-        console.log('ðŸ“­ No drawing history found for room:', roomKey);
+        console.log('No drawing history found for room:', roomKey);
         return [];
       }
 
@@ -284,12 +404,12 @@ class HypercoreSaveManager {
         });
       }
 
-      console.log('ðŸ“š Drawing history for room:', roomKey.substring(0, 8) + '...');
+      console.log('Drawing history for room:', roomKey.substring(0, 8) + '...');
       console.table(history);
 
       return history;
     } catch (error) {
-      console.error('âŒ Failed to get drawing history:', error);
+      console.error('Failed to get drawing history:', error);
       return [];
     }
   }
@@ -302,8 +422,8 @@ class HypercoreSaveManager {
 const CONFIG = {
   WORLD_WIDTH: 50000,
   WORLD_HEIGHT: 50000,
-  MIN_ZOOM: 0.2,
-  MAX_ZOOM: 8,
+  MIN_ZOOM: 0.1,
+  MAX_ZOOM: 16,
   ZOOM_STEP: 1.1,
   GRID_TARGET_PX: 32,
   MIN_MINOR_PX: 8
@@ -372,6 +492,7 @@ class AppState {
     // Canvas
     this.ctx = null;
     this.DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1));
+    this.PEAR_PATH = PEAR_PATH
   }
 
   generateRandomId() {
@@ -423,6 +544,16 @@ export const ui = {
   // Button/Grp
   peerCountBtn: $('#peer-count-btn'),
   canvasRoomKey: $('.canvas-room-key'),
+  loadStateBtn: $('.load-state-btn'),
+  slideStateContainer: $('#slide-state-container'),
+  slideStateBtn: $('.slide-state-btn'),
+
+  // Auth controls
+  authContainer: document.querySelector('#auth-container'),
+  authInput: document.querySelector('#auth-input'),
+  authPass: document.querySelector('#auth-pass'),
+  signUpBtn: document.querySelector('#auth-signup'),
+  signInBtn: document.querySelector('#auth-signin'),
 
   // Tools
   tools: $('#tools'),
@@ -950,7 +1081,6 @@ class GeometryUtils {
   }
 }
 
-console.log('Local Peer ID : ', state.localPeerId)
 // ============================================================================
 // DRAWING TOOLS
 // ============================================================================
@@ -2218,16 +2348,16 @@ class UIManager {
       return;
     }
 
-    const success = await HypercoreSaveManager.saveDrawingState(state.topicKey);
+    const success = await HypercoreManager.saveDrawingState(state.topicKey);
     if (success) {
-      alert('âœ… Drawing state saved to Hypercore!');
+      alert('Drawing state saved to Hypercore!');
       // Show visual feedback
-      ui.saveState.textContent = 'âœ…';
+      ui.saveState.textContent = '';
       setTimeout(() => {
-        ui.saveState.textContent = 'ðŸ’¾ Save State';
+        ui.saveState.textContent = 'Save State';
       }, 2000);
     } else {
-      alert('âŒ Failed to save drawing state');
+      alert('Failed to save drawing state');
     }
   }
 
@@ -2273,22 +2403,6 @@ class SessionManager {
       await NetworkManager.initSwarm(topicHex);
       UIManager.showWorkspace();
       CanvasManager.resizeCanvas();
-
-      // Try to auto-load saved drawing after network stabilizes
-      // setTimeout(async () => {
-      //   try {
-      //     const hasDrawings = await HypercoreSaveManager.hasDrawings(topicHex);
-      //     if (hasDrawings) {
-      //       const loaded = await HypercoreSaveManager.loadLatestDrawing(topicHex);
-      //       if (loaded) {
-      //         console.log('ðŸŽ¨ Auto-loaded saved drawing for room:', topicHex.substring(0, 8) + '...');
-      //       }
-      //     }
-      //   } catch (error) {
-      //     console.error('Failed to auto-load drawing:', error);
-      //   }
-      // }, 2000); // Wait for network to stabilize
-
     } catch (error) {
       console.error('Failed to start networking:', error);
       alert('Failed to start networking');
@@ -2331,7 +2445,7 @@ class NetworkManager {
     // Setup Hypercore replication for this peer
     if (state.topicKey) {
       setTimeout(() => {
-        HypercoreSaveManager.setupReplication(state.topicKey, connection);
+        HypercoreManager.setupReplication(state.topicKey, connection);
       }, 1000); // Wait for connection to stabilize
     }
 
@@ -2593,30 +2707,21 @@ class NetworkManager {
 // ============================================================================
 
 class WhiteboardApp {
-  static initialiszed = false
-
   static async init() {
-    console.log('ðŸŽ¨ Initializing P2P Collaborative Whiteboard...');
-    console.log('Local Peer ID:', state.localPeerId);
     state.localPeerId = await initAuth()
-    if(this.initialiszed) return;
-    this.initialiszed = true;
-    initializeRoomList()
-    // Initialize all managers
+    console.log(state.localPeerId)
+    await initializeRoomList()
+
     CanvasManager.init();
     InputHandler.init();
     CursorManager.init();
     UIManager.init();
 
-    // Set initial tool and UI state
     DrawingTools.selectTool('pen');
     state.strokeColor = ui.color.value;
     state.strokeSize = parseInt(ui.size.value, 10);
 
-    // Show setup screen
     UIManager.showSetup();
-
-    console.log('âœ… Whiteboard application initialized successfully');
   }
 }
 
@@ -2624,54 +2729,26 @@ class WhiteboardApp {
 // APPLICATION BOOTSTRAP
 // ============================================================================
 
-document.addEventListener('DOMContentLoaded', () => {
-  WhiteboardApp.init();
-});
+document.addEventListener('DOMContentLoaded', async () => {
+  if (window.__WB_BOOTED__) { console.warn('Boot skipped: already booted'); return; }
+  window.__WB_BOOTED__ = true;
+  console.log('WhiteboardApp.init called')
+  await WhiteboardApp.init();
 
-// Enhanced room key copying
-ui.canvasRoomKey.addEventListener('click', () => {
-  const textToCopy = ui.topicOut.getAttribute('data-value')
-  if(navigator.clipboard) {
-    navigator.clipboard.writeText(textToCopy).then(() => {
-      alert('Room key copied to clipboard! ðŸ“‹');
-    }).catch(err => {
-      console.error('Failed to copy: ', err);
-    });
-  }
-})
-
-// Enhanced load state button with better feedback
-document.querySelector('.load-state-btn').addEventListener('click', async () => {
-  const roomKey = ui.topicOut.getAttribute('data-value');
-  console.log('ðŸ”„ Loading drawing state for room:', roomKey);
-
-  const success = await HypercoreSaveManager.loadLatestDrawing(roomKey);
-  if (success) {
-    alert('âœ… Drawing loaded successfully!');
-    // Show drawing history
-    HypercoreSaveManager.getDrawingHistory(roomKey);
-  } else {
-    alert('âš ï¸ No saved drawing found or failed to load');
-  }
-});
+}, { once: true });
 
 
 
-
-import fs from 'fs';
-import path from 'path';
-import {initAuth} from "./Auth/auth.js";
-
-export function initializeRoomList() {
+function initializeRoomList() {
   function loadRooms(callback) {
-    fs.readdir(PEAR_PATH, (err, items) => {
+    fs.readdir(`${PEAR_PATH}/${state.localPeerId}`, (err, items) => {
       if (err) {
-        console.error('Failed to read rooms directory:', err);
+        console.error('Failed to read rooms directory of HypercoreManager:', err);
         callback([]);
         return;
       }
       const folders = items.filter(item =>
-          fs.statSync(path.join(PEAR_PATH, item)).isDirectory()
+          fs.statSync(path.join(`${PEAR_PATH}/${state.localPeerId}`, item)).isDirectory()
       );
       console.log(folders);
       callback(folders);
@@ -2687,56 +2764,96 @@ export function initializeRoomList() {
     } else {
       peersList.innerHTML = `
         <ul>
-          ${folders.map(name => `<li>${name}</li>`).join('')}
+          ${folders.map(name => `<li id="room-list" data-value="${name}">${name}</li>`).join('')}
         </ul>
       `;
     }
   });
 }
+if (!window.__WB_EVENTS_BOUND__) {
+  window.__WB_EVENTS_BOUND__ = true;
+// Enhanced room key copying
+  ui.canvasRoomKey.addEventListener('click', () => {
+    const textToCopy = ui.topicOut.getAttribute('data-value')
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(textToCopy).then(() => {
+        alert('Room key copied to clipboard! ðŸ“‹');
+      }).catch(err => {
+        console.error('Failed to copy: ', err);
+      });
+    }
+  })
+
+// Enhanced load state button with better feedback
+  ui.loadStateBtn.addEventListener('click', async () => {
+    if (ui.loadStateBtn.dataset.loading === '1') return;
+    ui.loadStateBtn.dataset.loading = '1';
+    try {
+      const roomKey = ui.topicOut.getAttribute('data-value');
+      console.log('Loading drawing state for room:', roomKey);
+
+      const success = await HypercoreManager.loadLatestDrawing(roomKey);
+      if (success) {
+        alert('Drawing loaded successfully!');
+        // Show drawing history
+        HypercoreManager.getDrawingHistory(roomKey);
+      } else {
+        alert('No saved drawing found or failed to load');
+      }
+    } finally {
+      ui.loadStateBtn.dataset.loading = '0';
+    }
+  });
+
+
+  ui.slideStateBtn.addEventListener('click', () => {
+    State.listAllState(HypercoreManager.getDrawingHistory(ui.topicOut.getAttribute('data-value')))
+  })
 
 
 // Enhanced room management
-document.getElementById('delete-state').addEventListener('click', async () => {
-  const roomKey = document.getElementById('canvas-topic').getAttribute('data-value');
-  if (!roomKey) {
-    alert('No active room to delete');
-    return;
-  }
-
-  const confirmDelete = confirm(`Are you sure you want to delete all drawings in room "${roomKey}"?`);
-  if (confirmDelete) {
-    const success = await HypercoreSaveManager.deleteDrawings(roomKey);
-    if (success) {
-      alert('âœ… Room drawings deleted successfully');
-      location.reload(); // Refresh the room list
-    } else {
-      alert('âŒ Failed to delete room drawings');
+  document.getElementById('delete-state').addEventListener('click', async () => {
+    const roomKey = document.getElementById('canvas-topic').getAttribute('data-value');
+    if (!roomKey) {
+      alert('No active room to delete');
+      return;
     }
-  }
-});
+
+    const confirmDelete = confirm(`Are you sure you want to delete all drawings in room "${roomKey}"?`);
+    if (confirmDelete) {
+      const success = await HypercoreManager.deleteDrawings(roomKey);
+      if (success) {
+        alert('Room drawings deleted successfully');
+        location.reload(); // Refresh the room list
+      } else {
+        alert('Failed to delete room drawings');
+      }
+    }
+  });
 
 // Add room history viewer
-function showRoomHistory(roomKey) {
-  HypercoreSaveManager.getDrawingHistory(roomKey);
-}
+  function showRoomHistory(roomKey) {
+    HypercoreManager.getDrawingHistory(roomKey);
+  }
 
-const version = JSON.parse(fs.readFileSync('./package.json', 'utf8')).version
-document.querySelector('#version').innerHTML = version;
+  // const version = JSON.parse(fs.readFileSync('./package.json', 'utf8')).version
+  // document.querySelector('#version').innerHTML = version;
 
-document.querySelector('#state-details').addEventListener('click', () => {
-  console.log(state)
-})
+  document.querySelector('#state-details').addEventListener('click', () => {
+    console.log(state)
+  })
 
 // Export for potential external use
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {
-    WhiteboardApp,
-    state,
-    CanvasManager,
-    DrawingTools,
-    DocumentManager,
-    NetworkManager,
-    UIManager,
-    HypercoreSaveManager
-  };
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+      WhiteboardApp,
+      state,
+      CanvasManager,
+      DrawingTools,
+      DocumentManager,
+      NetworkManager,
+      UIManager,
+      HypercoreManager
+    };
+  }
 }
