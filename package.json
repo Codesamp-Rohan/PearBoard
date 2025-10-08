@@ -1,7 +1,7 @@
 {
   "name": "pearboard",
   "main": "index.html",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "pear": {
     "name": "pearboard",
     "type": "desktop",
@@ -9,7 +9,14 @@
       "backgroundColor": "#1F2430",
       "height": "720",
       "width": "1080"
-    }
+    },
+    "links": [
+      "https://*",
+      "http://*",
+      "127.0.0.1",
+      "localhost",
+      "https://cdnjs"
+    ]
   },
   "type": "module",
   "license": "Apache-2.0",
@@ -28,9 +35,15 @@
     "prettier": "^3.6.2"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.1.0",
+    "autobase": "^7.20.0",
     "b4a": "^1.7.2",
+    "corestore": "^7.4.8",
+    "crypto": "^1.0.1",
+    "hyperbee": "^2.26.5",
     "hypercore": "^11.16.2",
     "hypercore-crypto": "^3.6.1",
+    "hyperdb": "^4.18.0",
     "hyperswarm": "^4.14.0"
   }
 }

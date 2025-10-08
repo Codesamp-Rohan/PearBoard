@@ -8,7 +8,17 @@ pear-ctrl[data-platform="darwin"] { margin-top: 12px; margin-left: 10px; }
   left: 0;
   top: 0;
   background-color: #B0D94413;
-  filter: drop-shadow(2px 10px 6px #888);
+  /*filter: drop-shadow(2px 10px 6px #888);*/
+  z-index: 9999;
+}
+
+#create-join-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 :root{
@@ -19,14 +29,19 @@ pear-ctrl[data-platform="darwin"] { margin-top: 12px; margin-left: 10px; }
   --btn: #fff;
   --btn-active:#e2e8f0;
   --shadow:0 6px 20px rgba(0,0,0,.08);
+  --list:#f0f0f0;
+  --list-active:#ebebeb;
 }
 
 *{
   padding: 0;
   margin: 0;
-  box-sizing:border-box}
+  box-sizing:border-box
+}
 html,body{height:100%}
 body{
+  min-width: 300px;
+  min-height: 300px;
   margin:0;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter, Arial, "Apple Color Emoji","Segoe UI Emoji";
   color:var(--ink);
@@ -46,13 +61,25 @@ button, input, h4 {
   border-radius: 50px;
   border: 1px solid var(--muted);
   background: var(--btn);
-  font-size: 1rem;
+  font-size: 12px;
   cursor: pointer;
+  white-space: nowrap;
+}
+
+.button {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+input {
+  width: 100%;
 }
 
 #setup, #loading {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   align-items: center;
   justify-content: center;
   position: absolute;
@@ -127,8 +154,8 @@ button, input, h4 {
   font-size: 12px;
 }
 .icon {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
 }
 .label{display:flex; align-items:center; gap:6px; font-size:13px; color:#334155}
 input[type="range"]{width:140px}
@@ -187,20 +214,80 @@ p {
   z-index: 1;
 }
 
-#peers-list {
+#rooms-list-container {
   width: 30vw;
   min-width: 300px;
   height: 100%;
-  position: fixed;
+  position: relative;
   top: 32px;
+  left: 0;
+  z-index: 100;
+  background-color: #f8f9fa;
+  border-right: 3px solid var(--muted);
+  padding: 12px;
+}
+
+#slide-state-container {
+  width: 30vw;
+  height: 100%;
+  position: fixed;
+  top: 128px;
   right: 0;
   z-index: 100;
-  background-color: #e0f2fe;
-  box-shadow: 0 10px 10px #777;
+  background-color: #f8f9fa;
+  border-right: 3px solid var(--muted);
+  padding: 12px;
+}
+
+ul{
+  padding: 12px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+li{
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  list-style: none;
+  padding: 8px;
+  border-bottom: 1px solid var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  background: var(--list);
+  border-radius: 6px;
+  position: relative;
+}
+li:hover{background:var(--list-active)}
+
+#rooms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  height: 90%;
+}
+
+.room-list .delete-icon {
+  position: absolute;
+  right: -40px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #c00;
+  font-size: 12px;
+  cursor: pointer;
+  transition: right 0.3s ease;
+}
+
+.room-list:hover .delete-icon {
+  right: 16px;
 }
 
 .canvas-room-key {
-  box-shadow: 0 10px 10px #ddd;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -244,5 +331,69 @@ p {
 
 #peer-count-btn {
   border: 1px solid var(--muted);
-  box-shadow: 0 10px 10px #ddd;
+}
+
+#auth-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: fixed;
+  background: #f8f9fa;
+  z-index: 1000;
+}
+#auth-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+#state-details {
+  position: fixed;
+  top: 3px;
+  right: 48px;
+  z-index: 1001;
+  font-size: 12px;
+  padding: 4px 16px;
+  border-radius: 8px;
+  background: #fff !important;
+  border: 1px solid var(--muted);
+}
+
+.peer-fo {
+  width: 100%;
+  max-width: 300px;
+  position: fixed;
+  top: 30%;
+  right: 0;
+  transform: translate(-50%, -50%);
+}
+
+.icon {
+  width: 12px;
+  height: 12px;
+}
+
+#version {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+}
+
+.account-details {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+#logout-btn {
+  background: #cc0000;
+  cursor: pointer;
+  font-size: 12px;
+  color: #fff;
+  border: #cc0000;
 }
