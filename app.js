@@ -5,9 +5,6 @@ import { addAlphaToColor, getRandomColorPair } from "./helper.js";
 import Hypercore from 'hypercore';
 import {initAuth, auth} from "./Auth/auth.js";
 
-// For folder logging
-import fs from 'fs';
-import path from 'path';
 import Log from "./logs/log.js";
 
 export const PEAR_PATH = Pear.config.storage
@@ -90,7 +87,7 @@ export class HypercoreManager {
     try {
       const core = await this.initCore(roomKey);
       if (!core || core.length === 0) {
-        console.log('ðŸ“­ No saved drawing found for room:', roomKey);
+        console.log('saved drawing found for room:', roomKey);
         return false;
       }
 
@@ -99,11 +96,11 @@ export class HypercoreManager {
       const latestData = await core.get(latestIndex);
 
       if (!latestData || !latestData.objects || !latestData.order) {
-        console.warn('âš ï¸ Invalid drawing data in Hypercore');
+        console.warn('Invalid drawing data in Hypercore');
         return false;
       }
 
-      console.log('âœ… Loading drawing from Hypercore for room:', roomKey);
+      console.log('Loading drawing from Hypercore for room:', roomKey);
       Log.logHypercoreData(latestData, latestIndex);
 
       // Apply loaded state WITHOUT triggering render twice
@@ -159,7 +156,7 @@ export class HypercoreManager {
       state.requestRender();
     }
 
-    console.log('ðŸŽ¨ Applied drawing state with', state.doc.order.length, 'objects');
+    console.log('Applied drawing state with', state.doc.order.length, 'objects');
   }
 
 
@@ -208,7 +205,7 @@ export class HypercoreManager {
     try {
       const core = await this.initCore(roomKey);
       if (!core || core.length === 0) {
-        console.log('ðŸ“­ No saved drawing found for room:', roomKey);
+        console.log('No saved drawing found for room:', roomKey);
         return false;
       }
 
@@ -216,11 +213,11 @@ export class HypercoreManager {
       const latestData = await core.get(latestIndex);
 
       if (!latestData || !latestData.objects || !latestData.order) {
-        console.warn('âš ï¸ Invalid drawing data in Hypercore');
+        console.warn('Invalid drawing data in Hypercore');
         return false;
       }
 
-      console.log('âœ… Loading drawing from Hypercore for room:', roomKey);
+      console.log('Loading drawing from Hypercore for room:', roomKey);
       Log.logHypercoreData(latestData, latestIndex);
 
       this.applyDrawingState(latestData);
@@ -242,7 +239,7 @@ export class HypercoreManager {
 
       return true;
     } catch (error) {
-      console.error('âŒ Failed to load from Hypercore:', error);
+      console.error('Failed to load from Hypercore:', error);
       return false;
     }
   }
@@ -274,7 +271,7 @@ export class HypercoreManager {
       state.requestRender();
     }
 
-    console.log('ðŸŽ¨ Applied drawing state with', state.doc.order.length, 'objects');
+    console.log('Applied drawing state with', state.doc.order.length, 'objects');
   }
 
 // NEW: Hypercore replication setup for peer synchronization
@@ -284,7 +281,7 @@ export class HypercoreManager {
 
     try {
       const peerId = connection.peerId || 'unknown';
-      console.log(`ðŸ”— Setting up Hypercore replication for ${roomKey} with peer ${peerId}`);
+      console.log(`Setting up Hypercore replication for ${roomKey} with peer ${peerId}`);
 
       // Create replication stream
       const stream = core.replicate(false, { live: true });
@@ -297,7 +294,7 @@ export class HypercoreManager {
 
       // Handle replication events
       stream.on('sync', () => {
-        console.log(`ðŸ”„ Hypercore synced with peer ${peerId}`);
+        console.log(`Hypercore synced with peer ${peerId}`);
         // Reload drawing after sync
         setTimeout(() => {
           this.loadLatestDrawing(roomKey);
@@ -305,18 +302,18 @@ export class HypercoreManager {
       });
 
       stream.on('error', (err) => {
-        console.error(`âŒ Replication error with peer ${peerId}:`, err);
+        console.error(`Replication error with peer ${peerId}:`, err)
         this.replicationStreams.delete(peerId);
       });
 
       // Clean up on connection close
       connection.socket.on('close', () => {
         this.replicationStreams.delete(peerId);
-        console.log(`ðŸ”Œ Replication stream closed for peer ${peerId}`);
+        console.log(`Replication stream closed for peer ${peerId}`);
       });
 
     } catch (error) {
-      console.error('âŒ Failed to setup Hypercore replication:', error);
+      console.error('Failed to setup Hypercore replication:', error);
     }
   }
 
@@ -343,12 +340,12 @@ export class HypercoreManager {
     try {
       const core = await this.initCore(roomKey)
       if(!core || core.length === 0) {
-        console.log('ðŸ“­ No saved drawing found for room:', roomKey);
+        console.log('No saved drawing found for room:', roomKey);
         return false;
       }
 
       await core.clear(roomKey)
-      console.log('ðŸ—‘ï¸ Cleared drawings for room:', roomKey);
+      console.log('Cleared drawings for room:', roomKey);
       return true;
     } catch (e) {
       console.error('Failed to clear the Hypercore of', roomKey, ':', e);
@@ -2438,7 +2435,7 @@ class NetworkManager {
     state.peerCount = state.connections.size;
     UIManager.updatePeerCount(state.peerCount);
 
-    console.log(`ðŸ”— New peer connected: ${peerId}`);
+    console.log(`New peer connected: ${peerId}`);
 
     // Setup Hypercore replication for this peer
     if (state.topicKey) {
@@ -2466,7 +2463,7 @@ class NetworkManager {
       state.connections.delete(connection);
       state.peerCount = state.connections.size;
       UIManager.updatePeerCount(state.peerCount);
-      console.log(`ðŸ”Œ Peer disconnected: ${peerId}`);
+      console.log(`Peer disconnected: ${peerId}`);
     });
 
     socket.once('error', () => {
@@ -2540,7 +2537,7 @@ class NetworkManager {
   static handleRemoteMessage(message) {
     switch (message.t) {
       case 'hello':
-        console.log(`ðŸ‘‹ Hello from peer: ${message.from}`);
+        console.log(`Hello from peer: ${message.from}`);
         this.applySnapshot(message.doc);
         // Reply with our version if we're ahead
         if (state.doc.version > (message.doc?.version ?? -1)) {
@@ -2575,10 +2572,10 @@ class NetworkManager {
         this.handleCursorMessage(message);
         break;
       case 'hypercore_saved':
-        console.log('ðŸ“‚ Peer', message.from, 'saved drawing to Hypercore at', new Date(message.savedAt));
+        console.log('Peer', message.from, 'saved drawing to Hypercore at', new Date(message.savedAt));
         break;
       case 'hypercore_loaded':
-        console.log('ðŸ“‚ Peer', message.from, 'loaded drawing from Hypercore, version:', message.loadedVersion);
+        console.log(' Peer', message.from, 'loaded drawing from Hypercore, version:', message.loadedVersion);
         break;
     }
   }
@@ -2767,20 +2764,42 @@ function initializeRoomList() {
   });
 }
 
+// JavaScript
 function renderRoomList(rooms) {
+  const container = ui.roomsList;
+
   if (!rooms || rooms.length === 0) {
-    ui.roomsList.innerHTML = '<li>No rooms found.</li>';
+    container.innerHTML = '<li>No rooms found.</li>';
     return;
   }
 
   const html = rooms
-      .map(room => `<li class="room-list" data-value="${room.key}" data-name="${room.value.roomName}">
-      <div class="room-name">${room.value.roomName}</div>
-  <div class="room-date">Created: ${new Date(room.value.createdAt).toLocaleString()}</div>
-</li>`).join('');
+      .map((room) => `
+      <li class="room-list" data-value="${room.key}" data-name="${room.value.roomName}">
+        <div class="room-name">${room.value.roomName}</div>
+        <div class="room-date">
+          Created: ${new Date(room.value.createdAt).toLocaleString()}
+        </div>
+        <i class="fas fa-trash delete-icon" title="Delete room"></i>
+      </li>
+    `)
+      .join('');
 
-  ui.roomsList.innerHTML = `<ul>${html}</ul>`;
+  container.innerHTML = html;
+
+  const icons = container.querySelectorAll('.delete-icon');
+  icons.forEach((icon) => {
+    icon.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const li = e.currentTarget.closest('.room-list');
+      const roomKey = li.getAttribute('data-value');
+      await auth.deleteRoom(state.peerName, roomKey)
+      await initializeRoomList();
+      console.log('Delete room with key:', roomKey);
+    });
+  });
 }
+
 
 if (!window.__WB_EVENTS_BOUND__) {
   window.__WB_EVENTS_BOUND__ = true;
@@ -2789,7 +2808,7 @@ if (!window.__WB_EVENTS_BOUND__) {
     const textToCopy = ui.topicOut.getAttribute('data-value')
     if (navigator.clipboard) {
       navigator.clipboard.writeText(textToCopy).then(() => {
-        alert('Room key copied to clipboard! ðŸ“‹');
+        alert('Room key copied to clipboard!');
       }).catch(err => {
         console.error('Failed to copy: ', err);
       });

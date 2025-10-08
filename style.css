@@ -260,8 +260,32 @@ li{
   font-size: 12px;
   background: var(--list);
   border-radius: 6px;
+  position: relative;
 }
 li:hover{background:var(--list-active)}
+
+#rooms-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  height: 90%;
+}
+
+.room-list .delete-icon {
+  position: absolute;
+  right: -40px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #c00;
+  font-size: 12px;
+  cursor: pointer;
+  transition: right 0.3s ease;
+}
+
+.room-list:hover .delete-icon {
+  right: 16px;
+}
 
 .canvas-room-key {
   display: flex;
@@ -329,14 +353,14 @@ li:hover{background:var(--list-active)}
 }
 #state-details {
   position: fixed;
-  bottom: 12px;
-  right: 12px;
+  top: 3px;
+  right: 48px;
   z-index: 1001;
   font-size: 12px;
   padding: 4px 16px;
   border-radius: 8px;
+  background: #fff !important;
   border: 1px solid var(--muted);
-  box-shadow: 0 10px 10px #ddd;
 }
 
 .peer-fo {
@@ -357,4 +381,19 @@ li:hover{background:var(--list-active)}
   position: absolute;
   top: 8px;
   right: 12px;
+}
+
+.account-details {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+#logout-btn {
+  background: #cc0000;
+  cursor: pointer;
+  font-size: 12px;
+  color: #fff;
+  border: #cc0000;
 }

@@ -153,9 +153,19 @@ export class Auth {
         return users.rooms;
     }
 
-    async deleteRoom(roomKey) {
-        await userDB.del(roomKey);
+    async deleteRoom(username, roomKey) {
+        console.log('Deleting room:', { username, roomKey });
+
+        const user = await this.getUser(username);
+
+        delete user.rooms[roomKey];
+
+        await userDB.put(username, user);
+        console.log('Room deleted successfully:', roomKey);
+
+        return true;
     }
+
 }
 
 export const auth = new Auth();

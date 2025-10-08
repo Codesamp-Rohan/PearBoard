@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Whiteboard — Vanilla JS</title>
   <link rel="stylesheet" href="./style.css" />
+  <link rel="stylesheet" href="./node_modules/@fortawesome/fontawesome-free/css/all.min.css">
 </head>
 <body>
 <p class="drag-msg">Use <b>shift</b> to drag</p>
@@ -33,9 +34,15 @@
 <!--Canvas Create/Join Setup-->
 <div id="setup" style="z-index: 999;">
   <div id="rooms-list-container">
+    <div style="display: flex; flex-direction: column; gap: 4px; height: 90%">
     <h5 style="padding: 0 8px">Canvas Room History</h5>
-  <div id="rooms-list" class="">
-  </div>
+    <div id="rooms-list" class="">
+    </div>
+    </div>
+    <div class="account-details" style="display: flex; flex-direction: row; align-items: center; gap: 4px;">
+      <button id="logout-btn" type="button">Logout <i class="fas fa-sign-out icon" title="Logout icon"></i></button>
+      <button id="account-btn" type="button">Account Info ! </button>
+    </div>
   </div>
   <div id="create-join-container">
   <div>

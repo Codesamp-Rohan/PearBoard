@@ -16,3 +16,17 @@ export function getRandomColorPair() {
     ];
     return colors[Math.floor(Math.random() * colors.length)];
 }
+
+var isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+console.log(isMac)
+if (!isMac) {
+    document.querySelector('#titlebar').style.backgroundColor = 'black';
+    document.querySelector('#state-details').style.left = '48px';
+    document.querySelector('#version').style.left = '12px';
+    document.querySelector('#state-details').style.backgroundColor = 'white';
+    document.querySelector('#version').style.color = 'white';
+}
+
+document.querySelector('#logout-btn').addEventListener('click', () => {
+    window.location.reload(true)
+})

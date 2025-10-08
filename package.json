@@ -9,7 +9,14 @@
       "backgroundColor": "#1F2430",
       "height": "720",
       "width": "1080"
-    }
+    },
+    "links": [
+      "https://*",
+      "http://*",
+      "127.0.0.1",
+      "localhost",
+      "https://cdnjs"
+    ]
   },
   "type": "module",
   "license": "Apache-2.0",
@@ -28,6 +35,7 @@
     "prettier": "^3.6.2"
   },
   "dependencies": {
+    "@fortawesome/fontawesome-free": "^7.1.0",
     "autobase": "^7.20.0",
     "b4a": "^1.7.2",
     "corestore": "^7.4.8",
