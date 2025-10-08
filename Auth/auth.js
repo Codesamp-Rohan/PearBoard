@@ -38,8 +38,9 @@ export class Auth {
         if (!username || !password) return false;
 
         const existing = await this.getUser(username);
+        const rooms = new Map()
+        console.log(await this.getAllUsers())
         if (existing) {
-            console.error('User already exists');
             return false;
         }
 
@@ -48,11 +49,13 @@ export class Auth {
             .digest('hex');
 
         const peerID = crypto.randomBytes(5).toString('hex');
+        console.log('Auth.signUP -> PEERID : ', peerID)
 
-        const userData = { username, passwordHash, peerID, createdAt: Date.now() };
+        const userData = { username, passwordHash, peerID, createdAt: Date.now(), rooms: rooms };
         await userDB.put(username, userData);
 
         console.log('User signed up successfully:', username, 'with ID:', peerID);
+        console.log(await this.getAllUsers())
         return peerID;
     }
 
@@ -60,6 +63,7 @@ export class Auth {
         if (!username || !password) return false;
 
         const user = await this.getUser(username);
+        console.log(await this.getAllUsers())
         if (!user) {
             console.error('User not found');
             return false;
@@ -75,12 +79,82 @@ export class Auth {
         }
 
         console.log('User signed in successfully:', username, 'with ID:', user.peerID);
+        console.log(await this.getAllUsers())
         return user.peerID;
     }
 
+    // User Functions
     async getUser(username) {
         const node = await userDB.get(username);
+        console.log('Get User : ', node)
         return node ? node.value : null;
+    }
+
+    async getAllUsers() {
+        const users = [];
+        for await (const { key, value } of userDB.createReadStream({ keys: true, values: true })) {
+            users.push({ key, value });
+            if(key !== value.username) {
+                console.log(key, value)
+                if(await this.deleteUser(key)) {
+                    alert('Faulty Users deleted successfully')
+                }
+            }
+        }
+        return users;
+    }
+
+    async deleteUser(key) {
+        await userDB.del(key);
+        return true;
+    }
+
+    // Rooms functions
+    async addRoom(username, roomKey, roomName = 'New Room' ) {
+        const user = await this.getUser(username);
+        if(!user) return;
+
+        if (await this.hasRoom(username, roomKey)) {
+            console.log('Room already exists for user:', username, 'roomKey:', roomKey);
+            return { roomKey, roomName, createdAt: Date.now(), alreadyExists: true };
+        }
+
+        if (!user.rooms || user.rooms instanceof Map) {
+            user.rooms = {};
+        }
+
+        const room = {
+            roomKey,
+            roomName,
+            createdAt: Date.now()
+        };
+        console.log('Room : ', room)
+
+        user.rooms[roomKey] = room;
+        await userDB.put(username, user);
+
+        console.log('Room added successfully to user:', username);
+        return room;
+    }
+
+    async getRoom(roomKey) {
+        const room = await userDB.get(roomKey);
+        return room ? room.value : null;
+    }
+
+    async hasRoom(username, roomKey) {
+        const user = await this.getUser(username);
+        if(!user) return false;
+        return !!(user.rooms && user.rooms[roomKey]);
+    }
+
+    async getAllRooms(username) {
+        const users = await this.getUser(username)
+        return users.rooms;
+    }
+
+    async deleteRoom(roomKey) {
+        await userDB.del(roomKey);
     }
 }
 
@@ -120,7 +194,6 @@ export async function initAuth() {
                 } else {
                     alert('Sign up failed');
                 }
-                console.log(state.peerID, state.localPeerId);
             } catch (error) {
                 console.error('Sign up error:', error);
                 alert('Sign up failed: ' + error.message);

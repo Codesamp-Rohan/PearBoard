@@ -40,6 +40,8 @@ pear-ctrl[data-platform="darwin"] { margin-top: 12px; margin-left: 10px; }
 }
 html,body{height:100%}
 body{
+  min-width: 300px;
+  min-height: 300px;
   margin:0;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter, Arial, "Apple Color Emoji","Segoe UI Emoji";
   color:var(--ink);
@@ -62,6 +64,17 @@ button, input, h4 {
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
+}
+
+.button {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+input {
+  width: 100%;
 }
 
 #setup, #loading {
@@ -141,8 +154,8 @@ button, input, h4 {
   font-size: 12px;
 }
 .icon {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
 }
 .label{display:flex; align-items:center; gap:6px; font-size:13px; color:#334155}
 input[type="range"]{width:140px}
@@ -201,7 +214,7 @@ p {
   z-index: 1;
 }
 
-#peers-list-container {
+#rooms-list-container {
   width: 30vw;
   min-width: 300px;
   height: 100%;
@@ -251,7 +264,6 @@ li{
 li:hover{background:var(--list-active)}
 
 .canvas-room-key {
-  box-shadow: 0 10px 10px #ddd;
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -295,7 +307,6 @@ li:hover{background:var(--list-active)}
 
 #peer-count-btn {
   border: 1px solid var(--muted);
-  box-shadow: 0 10px 10px #ddd;
 }
 
 #auth-container {
@@ -326,4 +337,24 @@ li:hover{background:var(--list-active)}
   border-radius: 8px;
   border: 1px solid var(--muted);
   box-shadow: 0 10px 10px #ddd;
+}
+
+.peer-fo {
+  width: 100%;
+  max-width: 300px;
+  position: fixed;
+  top: 30%;
+  right: 0;
+  transform: translate(-50%, -50%);
+}
+
+.icon {
+  width: 12px;
+  height: 12px;
+}
+
+#version {
+  position: absolute;
+  top: 8px;
+  right: 12px;
 }

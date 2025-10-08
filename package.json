@@ -1,7 +1,7 @@
 {
   "name": "pearboard",
   "main": "index.html",
-  "version": "1.0.2",
+  "version": "1.0.4",
   "pear": {
     "name": "pearboard",
     "type": "desktop",

@@ -3,11 +3,12 @@ import b4a from 'b4a';
 import crypto from 'hypercore-crypto';
 import { addAlphaToColor, getRandomColorPair } from "./helper.js";
 import Hypercore from 'hypercore';
-import { initAuth } from "./Auth/auth.js";
+import {initAuth, auth} from "./Auth/auth.js";
 
 // For folder logging
 import fs from 'fs';
 import path from 'path';
+import Log from "./logs/log.js";
 
 export const PEAR_PATH = Pear.config.storage
 
@@ -15,7 +16,7 @@ export const PEAR_PATH = Pear.config.storage
 // HYPERCORE SAVE STATE SYSTEM - FIXED VERSION
 // ============================================================================
 
-class HypercoreManager {
+export class HypercoreManager {
   static cores = new Map();
   static replicationStreams = new Map();
 
@@ -66,7 +67,7 @@ class HypercoreManager {
       await core.append(drawingData);
 
       console.log('Drawing state saved to Hypercore for room:', roomKey);
-      this.logHypercoreData(drawingData, core.length - 1);
+      Log.logHypercoreData(drawingData, core.length - 1);
 
       this.replicateToAllPeers(roomKey);
 
@@ -103,7 +104,7 @@ class HypercoreManager {
       }
 
       console.log('âœ… Loading drawing from Hypercore for room:', roomKey);
-      this.logHypercoreData(latestData, latestIndex);
+      Log.logHypercoreData(latestData, latestIndex);
 
       // Apply loaded state WITHOUT triggering render twice
       this.applyDrawingState(latestData);
@@ -184,7 +185,7 @@ class HypercoreManager {
       await core.append(drawingData);
 
       console.log('Drawing state saved to Hypercore for room:', roomKey);
-      this.logHypercoreData(drawingData, core.length - 1);
+      Log.logHypercoreData(drawingData, core.length - 1);
 
       this.replicateToAllPeers(roomKey);
 
@@ -211,7 +212,6 @@ class HypercoreManager {
         return false;
       }
 
-      // Get the latest entry (last item in hypercore)
       const latestIndex = core.length - 1;
       const latestData = await core.get(latestIndex);
 
@@ -221,12 +221,10 @@ class HypercoreManager {
       }
 
       console.log('âœ… Loading drawing from Hypercore for room:', roomKey);
-      this.logHypercoreData(latestData, latestIndex);
+      Log.logHypercoreData(latestData, latestIndex);
 
-      // Apply loaded state WITHOUT triggering render twice
       this.applyDrawingState(latestData);
 
-      // Broadcast to other peers that we've loaded
       NetworkManager.broadcast({
         t: 'hypercore_loaded',
         from: state.localPeerId,
@@ -277,31 +275,6 @@ class HypercoreManager {
     }
 
     console.log('ðŸŽ¨ Applied drawing state with', state.doc.order.length, 'objects');
-  }
-
-// FIXED: Better logging for Hypercore data
-  static logHypercoreData(data, index = null) {
-    console.group(`ðŸ“Š Hypercore Data ${index !== null ? `(Entry ${index})` : ''}`);
-    console.log('ðŸ“ Version:', data.version);
-    console.log('ðŸ•’ Saved at:', new Date(data.savedAt).toLocaleString());
-    console.log('ðŸ‘¤ Saved by:', data.savedBy);
-    console.log('ðŸŽ¨ Objects count:', data.order?.length || 0);
-    console.log('ðŸ”‘ Room key:', data.roomKey?.substring(0, 8) + '...');
-
-    if (data.order && data.order.length > 0) {
-      console.log('ðŸ“‹ Object IDs:', data.order.slice(0, 5), data.order.length > 5 ? '...' : '');
-      console.log('ðŸ–Œï¸ Sample objects:');
-      data.order.slice(0, 3).forEach(id => {
-        const obj = data.objects[id];
-        if (obj) {
-          console.log(`  â€¢ ${id.substring(0, 6)}: ${obj.type} (${obj.color}, size: ${obj.size})`);
-        }
-      });
-      if (data.order.length > 3) {
-        console.log(`  ... and ${data.order.length - 3} more objects`);
-      }
-    }
-    console.groupEnd();
   }
 
 // NEW: Hypercore replication setup for peer synchronization
@@ -532,6 +505,10 @@ export const ui = {
   boardWrap: $('.board-wrap'),
   canvas: $('#board'),
   overlayCanvas: $('#overlay'),
+
+  // Rooms
+  roomListContainer: $('#rooms-list-container'),
+  roomsList: $('#rooms-list'),
 
   // Session controls
   createBtn: $('#create-canvas'),
@@ -2289,19 +2266,40 @@ class UIManager {
   }
 
   static setupSessionHandlers() {
-    ui.createBtn.addEventListener('click', async () => {
-      const topic = crypto.randomBytes(32).toString('hex');
-      SessionManager.startSession(topic);
+    ui.createBtn.addEventListener("click", async () => {
+      const topic = crypto.randomBytes(32).toString("hex");
+      const roomName = state.peerName + "-" + topic.substr(0, 6);
+      const result = await auth.addRoom(state.peerName, topic, roomName);
+      if (result) {
+        console.log('Room created:', result);
+        SessionManager.startSession(topic);
+      } else {
+        alert('Failed to create room');
+      }
     });
 
-    ui.joinBtn.addEventListener('click', async () => {
+    ui.joinBtn.addEventListener("click", async () => {
       const topic = ui.joinInput.value.trim();
       if (!topic) {
-        alert('Enter a topic key');
+        alert("Enter a topic key");
         return;
       }
-      SessionManager.startSession(topic);
+
+      const roomName = state.peerName + "-" + topic.substr(0, 6);
+      const result = await auth.addRoom(state.peerName, topic, roomName);
+      console.log('Result : ', result)
+      if (result) {
+        if (result.alreadyExists) {
+          console.log('Joining existing room:', topic);
+        } else {
+          console.log('Room added and joining:', result);
+        }
+        SessionManager.startSession(topic);
+      } else {
+        alert('Failed to add room to your list');
+      }
     });
+
   }
 
   static updateUserName(username) {
@@ -2425,7 +2423,7 @@ class NetworkManager {
     });
 
     await state.swarm.join(topic, { server: true, client: true });
-    await state.swarm.flush(); // Ensure DHT announce before proceeding
+    await state.swarm.flush();
   }
 
   static setupConnection(socket) {
@@ -2737,39 +2735,53 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 }, { once: true });
 
-
-
 function initializeRoomList() {
-  function loadRooms(callback) {
-    fs.readdir(`${PEAR_PATH}/${state.localPeerId}`, (err, items) => {
-      if (err) {
-        console.error('Failed to read rooms directory of HypercoreManager:', err);
-        callback([]);
-        return;
-      }
-      const folders = items.filter(item =>
-          fs.statSync(path.join(`${PEAR_PATH}/${state.localPeerId}`, item)).isDirectory()
-      );
-      console.log(folders);
-      callback(folders);
-    });
-  }
+  auth.getAllRooms(state.peerName)
+      .then(raw => {
+        // Debug
+        console.log('RAW ROOMS:', raw, typeof raw, Array.isArray(raw));
 
-  loadRooms(folders => {
-    const peersList = document.getElementById('peers-list');
-    if (!peersList) return;
+        let roomsArray = [];
 
-    if (!folders.length) {
-      peersList.innerHTML = `<p>No rooms found.</p>`;
-    } else {
-      peersList.innerHTML = `
-        <ul>
-          ${folders.map(name => `<li id="room-list" data-value="${name}">${name}</li>`).join('')}
-        </ul>
-      `;
-    }
+        // Case A: already an array of {key,value}
+        if (Array.isArray(raw)) {
+          roomsArray = raw;
+        }
+        // Case B: object whose values are room objects
+        else if (raw && typeof raw === 'object') {
+          // e.g. { roomKey1:{…}, roomKey2:{…} }
+          roomsArray = Object.entries(raw).map(([key, value]) => ({ key, value }));
+        }
+
+        renderRoomList(roomsArray);
+      })
+      .catch(err => {
+        console.error('Error loading rooms:', err);
+        renderRoomList([]);
+      });
+
+  ui.roomsList.addEventListener('click', event => {
+    const li = event.target.closest('.room-list');
+    if (!li) return;
+    SessionManager.startSession(li.dataset.value);
   });
 }
+
+function renderRoomList(rooms) {
+  if (!rooms || rooms.length === 0) {
+    ui.roomsList.innerHTML = '<li>No rooms found.</li>';
+    return;
+  }
+
+  const html = rooms
+      .map(room => `<li class="room-list" data-value="${room.key}" data-name="${room.value.roomName}">
+      <div class="room-name">${room.value.roomName}</div>
+  <div class="room-date">Created: ${new Date(room.value.createdAt).toLocaleString()}</div>
+</li>`).join('');
+
+  ui.roomsList.innerHTML = `<ul>${html}</ul>`;
+}
+
 if (!window.__WB_EVENTS_BOUND__) {
   window.__WB_EVENTS_BOUND__ = true;
 // Enhanced room key copying
@@ -2829,6 +2841,23 @@ if (!window.__WB_EVENTS_BOUND__) {
         alert('Failed to delete room drawings');
       }
     }
+  });
+
+  document.querySelectorAll('.room-list').forEach(room => {
+    console.log(room)
+    room.addEventListener('click', async () => {
+      const roomKey = room.getAttribute('data-value');
+      if (!roomKey) {
+        alert('No active room to delete');
+        return;
+      }
+    })
+    room.addEventListener('click', () => {
+      console.log('Clicked room:')
+      const topic = room.dataset.value;
+      console.log('Topic:', topic)
+      if (topic) SessionManager.startSession(topic);
+    });
   });
 
 // Add room history viewer

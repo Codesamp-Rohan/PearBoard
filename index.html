@@ -12,7 +12,10 @@
 
 <!--Authentication-->
 <div id="auth-container">
+  <img class="peer-fo" src="./assets/PeerFO.png" alt="peer-fo-image">
   <div id="auth-form">
+    <h2 style="text-align: center">🪄<br/>Welcome to PearBoard</h2>
+    <p>Please Board In/Board Up to continue</p>
     <input id="auth-input" type="text" placeholder="Enter your name" />
     <input type="password" name="password" id="auth-pass" placeholder="Enter your password">
     <div style="display: flex; flex-direction: row; gap: 4px; width: 100%">
@@ -22,50 +25,27 @@
   </div>
 </div>
 
-<!--Floaters-->
-<div class="left-top-data">
-  <button class="load-state-btn" type="button">
-    <p>💾 Load State</p>
-  </button>
-  <button class="slide-state-btn" type="button">
-    <p>💾 Slide State</p>
-  </button>
-  <button class="canvas-room-key hidden" type="button">
-    <p>Canvas Topic</p><p id="canvas-topic"></p><img class="icon" src="./assets/copy.png" alt="copy-img">
-  </button>
-  <button class="group hidden" type="button" id="peer-count-btn">
-    <p>Peers Count : </p><p id="peers-count">1</p>
-  </button>
-  <div>
-    <button style="display: flex; flex-direction: row; align-items: center; gap: 4px;" class="button peer-name-container" type="button">
-      <p id="local-peer-name" class="name--btn"></p>
-      <img class="icon" src="./assets/arrow.png" alt="copy-img">
-    </button>
-<div class="hidden" id="name--input--popup">
-  <input style="font-size: 12px;" id="username-input" placeholder="Enter your name" />
-  <button style="font-size: 12px;" id="username-submit">Submit</button>
-</div>
-  </div>
-</div>
 <div id="titlebar">
   <pear-ctrl></pear-ctrl>
-  <p id="version">1.0.3</p>
+  <p id="version">1.0.4</p>
 </div>
+
+<!--Canvas Create/Join Setup-->
 <div id="setup" style="z-index: 999;">
-  <div id="peers-list-container">
-    <h5 style="padding: 0 8px">Saved Canvas History</h5>
-  <div id="peers-list" class="">
+  <div id="rooms-list-container">
+    <h5 style="padding: 0 8px">Canvas Room History</h5>
+  <div id="rooms-list" class="">
   </div>
   </div>
   <div id="create-join-container">
   <div>
-    <button id="create-canvas">Create</button>
+    <button class="button" id="create-canvas"><img class="icon" src="assets/icons/create.png" alt="icon" />Create</button>
   </div>
   <div id="or">
     - or -
   </div>
-  <div id="join-form">
-    <button type="button" id="join-canvas">Join</button>
+  <div id="join-form" style="display: flex; flex-direction: row; gap: 4px;">
+    <button class="button"  type="button" id="join-canvas"><img class="icon" src="assets/icons/join.png" alt="icon" />Join</button>
     <input required id="join-canvas-topic" type="text" placeholder="Chat room Topic" />
   </div>
   </div>
@@ -74,7 +54,7 @@
 <header class="toolbar hidden" role="toolbar" aria-label="Whiteboard toolbar">
   <div class="btn--container">
   <div class="group" id="tools" style="gap: 4px;">
-    <button class="btn active" data-tool="pen" title="Pen (P)">✏️</button>
+    <button class="btn active" data-tool="pen" title="Pen (P)"><img class="icon" src="assets/icons/pen.png" alt="icon" /></button>
     <button class="btn" data-tool="eraser" title="Eraser (E)">🧽</button>
     <button class="btn" data-tool="line" title="Line (L)">／</button>
     <button class="btn" data-tool="rect" title="Rectangle (R)">▭</button>
@@ -91,8 +71,8 @@
   </div>
   </div>
   <div class="group">
-    <label class="label">Color <input id="color" type="color" value="#111111" style="padding: 0" /></label>
-    <label class="label">Size <input id="size" type="range" min="1" max="50" value="6" /></label>
+    <label class="label">Color <input id="color" type="color" value="#111111" style="padding: 0; width: 30px" /></label>
+    <label class="label">Size <input id="size" type="number" min="1" max="50" value="6" /></label>
   </div>
   <div class="group">
     <label for="opacity-control" class="label">Opacity:</label>
@@ -100,7 +80,35 @@
   </div>
 </header>
 
+<!--Canvas Board-->
 <main class="board-wrap hidden">
+
+  <!--Floaters-->
+  <div class="left-top-data">
+<!--    Buttons-->
+    <button class="load-state-btn" type="button">
+      <p>💾 Load State</p>
+    </button>
+    <button class="slide-state-btn" type="button">
+      <p>💾 Slide State</p>
+    </button>
+    <button class="canvas-room-key hidden" type="button">
+      <p>Canvas Topic</p><p id="canvas-topic"></p><img class="icon" src="./assets/icons/copy.png" alt="copy-img">
+    </button>
+    <button class="group hidden" type="button" id="peer-count-btn">
+      <p>Peers Count : </p><p id="peers-count">1</p>
+    </button>
+    <div>
+      <button style="display: flex; flex-direction: row; align-items: center; gap: 4px;" class="button peer-name-container" type="button">
+        <p id="local-peer-name" class="name--btn"></p>
+        <img class="icon" src="./assets/icons/arrow.png" alt="copy-img">
+      </button>
+      <div class="hidden" id="name--input--popup">
+        <input style="font-size: 12px;" id="username-input" placeholder="Enter your name" />
+        <button style="font-size: 12px;" id="username-submit">Submit</button>
+      </div>
+    </div>
+  </div>
   <div id="slide-state-container" class="hidden"></div>
   <div id="zoom-scale-display" style="">100%</div>
   <canvas id="board" aria-label="Drawing canvas"></canvas>
