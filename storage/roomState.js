@@ -1,0 +1,4 @@
+class RoomState {
+    constructor() {
+    }
+}
