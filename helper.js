@@ -27,6 +27,6 @@ if (!isMac) {
     document.querySelector('#version').style.color = 'white';
 }
 
-document.querySelector('#logout-btn').addEventListener('click', () => {
-    window.location.reload(true)
+document.querySelector('.slide-state-btn').addEventListener('click', () => {
+    document.querySelector('#slide-state-container').classList.toggle('hidden');
 })

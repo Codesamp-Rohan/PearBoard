@@ -3,10 +3,13 @@ import b4a from 'b4a';
 import crypto from 'hypercore-crypto';
 import { addAlphaToColor, getRandomColorPair } from "./helper.js";
 import Hypercore from 'hypercore';
-import {initAuth, auth} from "./Auth/auth.js";
+import {Room, room} from "./Room/room.js";
 
 import Log from "./logs/log.js";
-
+import {globalState} from "./storage/GlobalState.js";
+import { state } from './storage/AppState.js'
+import {State} from "./states.js";
+import {AutobaseManager} from "./storage/AutobaseManager.js";
 export const PEAR_PATH = Pear.config.storage
 
 // ============================================================================
@@ -91,7 +94,6 @@ export class HypercoreManager {
         return false;
       }
 
-      // Get the latest entry (last item in hypercore)
       const latestIndex = core.length - 1;
       const latestData = await core.get(latestIndex);
 
@@ -127,36 +129,6 @@ export class HypercoreManager {
       console.error('âŒ Failed to load from Hypercore:', error);
       return false;
     }
-  }
-
-  // FIXED: Apply drawing state without double rendering
-  static applyDrawingState(drawingData) {
-    // Temporarily disable render requests to prevent double rendering
-    const originalRequestRender = state.requestRender;
-    let renderRequested = false;
-
-    state.requestRender = () => {
-      renderRequested = true;
-    };
-
-    for (const id of drawingData.order) {
-      if (drawingData.objects[id] && !state.doc.objects[id]) {
-        // Only add objects that don't already exist
-        state.doc.objects[id] = drawingData.objects[id];
-        state.doc.order.push(id);
-      }
-    }
-
-    state.doc.version = Math.max(state.doc.version, drawingData.version || 0) + 1;
-
-    // Restore render function and trigger once if needed
-    state.requestRender = originalRequestRender;
-
-    if (renderRequested) {
-      state.requestRender();
-    }
-
-    console.log('Applied drawing state with', state.doc.order.length, 'objects');
   }
 
 
@@ -400,94 +372,6 @@ const CONFIG = {
 };
 
 // ============================================================================
-// GLOBAL STATE - FIXED VERSION
-// ============================================================================
-
-class AppState {
-  constructor() {
-    this.localPeerId = null;
-    this.peerName = '';
-    this.zoom = 1;
-    this.panX = 0;
-    this.panY = 0;
-    this.tool = 'pen';
-    this.strokeColor = '#000000';
-    this.strokeSize = 2;
-    this.drawing = false;
-    this.isDragging = false;
-    this.isPanning = false;
-    this.spaceHeld = false;
-    this.touchPanning = false;
-    this.showGrid = true;
-    this.dirty = true;
-    this.eraserPath = null;
-    this.renderPending = false; // FIXED: Prevent double renders
-
-    // Object state
-    this.activeId = null;
-    this.hoverId = null;
-    this.start = null;
-    this.dragStart = null;
-    this.dragInitialPos = null;
-    this.tempShape = null;
-    this.textEl = null;
-
-    // Document state
-    this.doc = {
-      objects: {},
-      order: [],
-      version: 0
-    };
-
-    // History
-    this.undoStack = [];
-    this.redoStack = [];
-
-    // Networking
-    this.swarm = null;
-    this.topicKey = null;
-    this.joined = false;
-    this.connections = new Set();
-    this.peerCount = 0;
-    this.outbox = [];
-    this.flushing = false;
-
-    // Cursor tracking
-    this.peerCursors = new Map();
-    this.peerNames = new Map();
-    this.lastCX = 0;
-    this.lastCY = 0;
-    this.lastTouchMid = null;
-
-    // Canvas
-    this.ctx = null;
-    this.DPR = Math.max(1, Math.floor(window.devicePixelRatio || 1));
-    this.PEAR_PATH = PEAR_PATH
-  }
-
-  generateRandomId() {
-    return crypto.randomBytes(4).toString('hex');
-  }
-
-  bumpDoc() {
-    this.doc.version++;
-  }
-
-  // FIXED: Prevent double rendering with debouncing
-  requestRender() {
-    if (this.renderPending) return;
-    this.renderPending = true;
-
-    requestAnimationFrame(() => {
-      this.dirty = true;
-      this.renderPending = false;
-    });
-  }
-}
-
-export const state = new AppState();
-
-// ============================================================================
 // DOM UTILITIES
 // ============================================================================
 
@@ -521,13 +405,6 @@ export const ui = {
   loadStateBtn: $('.load-state-btn'),
   slideStateContainer: $('#slide-state-container'),
   slideStateBtn: $('.slide-state-btn'),
-
-  // Auth controls
-  authContainer: document.querySelector('#auth-container'),
-  authInput: document.querySelector('#auth-input'),
-  authPass: document.querySelector('#auth-pass'),
-  signUpBtn: document.querySelector('#auth-signup'),
-  signInBtn: document.querySelector('#auth-signin'),
 
   // Tools
   tools: $('#tools'),
@@ -2262,41 +2139,64 @@ class UIManager {
     ui.saveState.addEventListener('click', () => this.saveDrawingState());
   }
 
+  static async getRoomName() {
+    return document.querySelector('#room-name-input').value.trim();
+  }
+
   static setupSessionHandlers() {
-    ui.createBtn.addEventListener("click", async () => {
+    const setNameBtn = document.querySelector("#room-name-btn");
+    const roomNameForm = document.querySelector("#room-name-form");
+
+    // 1. Toggle the custom name form on Create click
+    ui.createBtn.addEventListener("click", () => {
+      roomNameForm.classList.remove("hidden");
+      roomNameForm.style.display = "flex";
+    });
+
+    // 2. After entering name, create the room
+    setNameBtn.addEventListener("click", async () => {
       const topic = crypto.randomBytes(32).toString("hex");
-      const roomName = state.peerName + "-" + topic.substr(0, 6);
-      const result = await auth.addRoom(state.peerName, topic, roomName);
+      const roomName = await this.getRoomName();
+      if (!roomName) {
+        alert("Please enter a room name");
+        return;
+      }
+
+      const result = await room.addRoom(topic, roomName, state.peerName);
       if (result) {
-        console.log('Room created:', result);
+        console.log("Room created:", await room.getRoom(topic));
+        await room.broadcastRoomDetails(topic, true, null)
         SessionManager.startSession(topic);
       } else {
-        alert('Failed to create room');
+        alert("Failed to create room");
       }
     });
 
+    // 3. Join existing room flow
     ui.joinBtn.addEventListener("click", async () => {
-      const topic = ui.joinInput.value.trim();
+      const topic = document
+          .querySelector("#join-canvas-topic")
+          .value.trim();
       if (!topic) {
         alert("Enter a topic key");
         return;
       }
 
-      const roomName = state.peerName + "-" + topic.substr(0, 6);
-      const result = await auth.addRoom(state.peerName, topic, roomName);
-      console.log('Result : ', result)
+      const result = await room.addRoom(
+          topic);
+      console.log("Result:", result);
+
       if (result) {
         if (result.alreadyExists) {
-          console.log('Joining existing room:', topic);
+          console.log("Joining existing room:", topic);
         } else {
-          console.log('Room added and joining:', result);
+          console.log("Room added and joining:", result);
         }
         SessionManager.startSession(topic);
       } else {
-        alert('Failed to add room to your list');
+        alert("Failed to add room to your list");
       }
     });
-
   }
 
   static updateUserName(username) {
@@ -2343,7 +2243,7 @@ class UIManager {
       return;
     }
 
-    const success = await HypercoreManager.saveDrawingState(state.topicKey);
+    const success = await room.addRoomState(state.topicKey);
     if (success) {
       alert('Drawing state saved to Hypercore!');
       // Show visual feedback
@@ -2410,7 +2310,7 @@ class SessionManager {
 // NETWORK MANAGEMENT - FIXED VERSION
 // ============================================================================
 
-class NetworkManager {
+export class NetworkManager {
   static async initSwarm(topicHex) {
     state.swarm = new Hyperswarm();
     const topic = b4a.from(topicHex, 'hex');
@@ -2425,36 +2325,33 @@ class NetworkManager {
 
   static setupConnection(socket) {
     const peerId = crypto.randomBytes(4).toString('hex');
-    const connection = {
-      socket: socket,
-      peerId: peerId,
-      closed: false
-    };
+    const connection = { socket: socket, peerId: peerId, closed: false };
 
     state.connections.add(connection);
     state.peerCount = state.connections.size;
     UIManager.updatePeerCount(state.peerCount);
 
-    console.log(`New peer connected: ${peerId}`);
+    console.log(`New peer connected: ${`peerId`}`);
 
     // Setup Hypercore replication for this peer
     if (state.topicKey) {
       setTimeout(() => {
         HypercoreManager.setupReplication(state.topicKey, connection);
-      }, 1000); // Wait for connection to stabilize
+      }, 1000);
     }
 
-    // Send initial hello with current document
     this.safeSend(connection, {
       t: 'hello',
       from: state.localPeerId,
-      doc: this.serializeDocument()
+      doc: this.serializeDocument(),
+      requestRoomDetails: true,
+      roomKey: state.topicKey
     });
 
     socket.on('data', (buffer) => {
       const message = this.decode(buffer);
       if (message) {
-        this.handleRemoteMessage(message);
+        this.handleRemoteMessage(message, connection);
       }
     });
 
@@ -2473,6 +2370,7 @@ class NetworkManager {
       UIManager.updatePeerCount(state.peerCount);
     });
   }
+
 
   static queueOperation(operation) {
     state.outbox.push(operation);
@@ -2534,16 +2432,36 @@ class NetworkManager {
     state.requestRender();
   }
 
-  static handleRemoteMessage(message) {
+  static async handleRemoteMessage(message) {
     switch (message.t) {
       case 'hello':
         console.log(`Hello from peer: ${message.from}`);
         this.applySnapshot(message.doc);
-        // Reply with our version if we're ahead
+
+        if (message.requestRoomDetails && message.roomKey === state.topicKey) {
+          const roomRecord = await room.getRoom(message.roomKey);
+          console.log(roomRecord)
+          const isCreator = roomRecord?.creator.name === globalState.getPeerName()
+          console.log(isCreator)
+          if (isCreator) {
+            setTimeout(() => {
+              room.broadcastRoomDetails(message.roomKey, true, message.from);
+            }, 500);
+          }
+        }
+
         if (state.doc.version > (message.doc?.version ?? -1)) {
-          this.broadcast({ t: 'full', snapshot: this.serializeDocument() });
+          this.broadcast({
+            t: 'full',
+            snapshot: this.serializeDocument()
+          });
         }
         break;
+
+      case 'room_details':
+        this.handleRoomDetailsMessage(message);
+        break;
+
       case 'full':
         this.applySnapshot(message.snapshot);
         break;
@@ -2577,7 +2495,38 @@ class NetworkManager {
       case 'hypercore_loaded':
         console.log(' Peer', message.from, 'loaded drawing from Hypercore, version:', message.loadedVersion);
         break;
+      case 'room_state_added':
+        console.log('Room state added from peer', message.from, 'version:', message.version);
+        break;
+      case 'autobase_loaded':
+        console.log(' Peer', message.from, 'loaded drawing from Autobase, version:', message.loadedVersion);
+        break;
     }
+  }
+
+  static handleRoomDetailsMessage(message) {
+    console.log('📥 Received room details from peer:', message.from);
+
+    if (message.details && message.roomKey === state.topicKey) {
+      this.updateLocalRoomInfo(message.details);
+      console.log('✅ Room details updated:', message.details);
+    }
+  }
+
+  static async updateLocalRoomInfo(roomDetails) {
+    const updatedDetails = {
+      roomName: roomDetails.roomName,
+      createdBy: roomDetails.createdBy,
+      createdAt: roomDetails.createdAt,
+    };
+
+    console.log('Updating local room details:', updatedDetails);
+
+    console.log(state.localPeerId === roomDetails.createdBy);
+
+    if(state.localPeerId !== updatedDetails.createdBy) await room.updateRoom(state.topicKey, updatedDetails);
+
+    console.log(await room.getRoom(state.topicKey));
   }
 
   static handleAddMessage(message) {
@@ -2703,7 +2652,7 @@ class NetworkManager {
 
 class WhiteboardApp {
   static async init() {
-    state.localPeerId = await initAuth()
+    state.localPeerId = await globalState.getPeerID()
     console.log(state.localPeerId)
     await initializeRoomList()
 
@@ -2711,6 +2660,7 @@ class WhiteboardApp {
     InputHandler.init();
     CursorManager.init();
     UIManager.init();
+    await HypercoreManager.initCore()
 
     DrawingTools.selectTool('pen');
     state.strokeColor = ui.color.value;
@@ -2733,20 +2683,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 }, { once: true });
 
 function initializeRoomList() {
-  auth.getAllRooms(state.peerName)
+  room.getAllRooms()
       .then(raw => {
-        // Debug
         console.log('RAW ROOMS:', raw, typeof raw, Array.isArray(raw));
-
         let roomsArray = [];
-
-        // Case A: already an array of {key,value}
         if (Array.isArray(raw)) {
           roomsArray = raw;
         }
-        // Case B: object whose values are room objects
         else if (raw && typeof raw === 'object') {
-          // e.g. { roomKey1:{…}, roomKey2:{…} }
           roomsArray = Object.entries(raw).map(([key, value]) => ({ key, value }));
         }
 
@@ -2793,7 +2737,7 @@ function renderRoomList(rooms) {
       e.stopPropagation();
       const li = e.currentTarget.closest('.room-list');
       const roomKey = li.getAttribute('data-value');
-      await auth.deleteRoom(state.peerName, roomKey)
+      await room.deleteRoom(roomKey)
       await initializeRoomList();
       console.log('Delete room with key:', roomKey);
     });
@@ -2823,7 +2767,8 @@ if (!window.__WB_EVENTS_BOUND__) {
       const roomKey = ui.topicOut.getAttribute('data-value');
       console.log('Loading drawing state for room:', roomKey);
 
-      const success = await HypercoreManager.loadLatestDrawing(roomKey);
+      const success = await room.loadLatestRoomState(roomKey);
+      console.log('Success', success)
       if (success) {
         alert('Drawing loaded successfully!');
         // Show drawing history
@@ -2836,11 +2781,9 @@ if (!window.__WB_EVENTS_BOUND__) {
     }
   });
 
-
   ui.slideStateBtn.addEventListener('click', () => {
-    State.listAllState(HypercoreManager.getDrawingHistory(ui.topicOut.getAttribute('data-value')))
+    HypercoreManager.getDrawingHistory(ui.topicOut.getAttribute('data-value'))
   })
-
 
 // Enhanced room management
   document.getElementById('delete-state').addEventListener('click', async () => {

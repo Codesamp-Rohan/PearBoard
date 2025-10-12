@@ -11,24 +11,9 @@
 <p class="drag-msg">Use <b>shift</b> to drag</p>
 <button id="state-details" type="button">!</button>
 
-<!--Authentication-->
-<div id="auth-container">
-  <img class="peer-fo" src="./assets/PeerFO.png" alt="peer-fo-image">
-  <div id="auth-form">
-    <h2 style="text-align: center">🪄<br/>Welcome to PearBoard</h2>
-    <p>Please Board In/Board Up to continue</p>
-    <input id="auth-input" type="text" placeholder="Enter your name" />
-    <input type="password" name="password" id="auth-pass" placeholder="Enter your password">
-    <div style="display: flex; flex-direction: row; gap: 4px; width: 100%">
-    <button style="width: 100%" id="auth-signin" type="button">Board In</button>
-    <button style="width: 100%"  id="auth-signup" type="button">Board Up</button>
-    </div>
-  </div>
-</div>
-
 <div id="titlebar">
   <pear-ctrl></pear-ctrl>
-  <p id="version">1.0.4</p>
+  <p id="version">1.0.6</p>
 </div>
 
 <!--Canvas Create/Join Setup-->
@@ -39,12 +24,16 @@
     <div id="rooms-list" class="">
     </div>
     </div>
-    <div class="account-details" style="display: flex; flex-direction: row; align-items: center; gap: 4px;">
+    <div class="account-details hidden" style="display: flex; flex-direction: row; align-items: center; gap: 4px;">
       <button id="logout-btn" type="button">Logout <i class="fas fa-sign-out icon" title="Logout icon"></i></button>
       <button id="account-btn" type="button">Account Info ! </button>
     </div>
   </div>
   <div id="create-join-container">
+    <div id="room-name-form" class="hidden" style="display: flex; flex-direction: row; gap: 4px;">
+      <button class="button"  type="button" id="room-name-btn"><img class="icon" src="assets/icons/join.png" alt="icon" />Join</button>
+      <input required id="room-name-input" type="text" placeholder="Chat room Topic" />
+    </div>
   <div>
     <button class="button" id="create-canvas"><img class="icon" src="assets/icons/create.png" alt="icon" />Create</button>
   </div>
