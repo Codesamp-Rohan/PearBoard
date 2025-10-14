@@ -2,360 +2,11 @@ import Hyperswarm from 'hyperswarm';
 import b4a from 'b4a';
 import crypto from 'hypercore-crypto';
 import { addAlphaToColor, getRandomColorPair } from "./helper.js";
-import Hypercore from 'hypercore';
 import {Room, room} from "./Room/room.js";
 
-import Log from "./logs/log.js";
 import {globalState} from "./storage/GlobalState.js";
 import { state } from './storage/AppState.js'
-import {State} from "./states.js";
-import {AutobaseManager} from "./storage/AutobaseManager.js";
 export const PEAR_PATH = Pear.config.storage
-
-// ============================================================================
-// HYPERCORE SAVE STATE SYSTEM - FIXED VERSION
-// ============================================================================
-
-export class HypercoreManager {
-  static cores = new Map();
-  static replicationStreams = new Map();
-
-  static async initCore(roomKey) {
-    if (this.cores.has(roomKey)) {
-      return this.cores.get(roomKey);
-    }
-
-    console.log(PEAR_PATH + state.localPeerId + roomKey)
-    try {
-      const core = new Hypercore(`${PEAR_PATH}/${state.localPeerId}/${roomKey}`, {
-        valueEncoding: 'json'
-      });
-
-      await core.ready();
-      this.cores.set(roomKey, core);
-
-      console.log('Hypercore initialized for room:', roomKey);
-      console.log('Core key:', core.key.toString('hex'));
-      console.log('Core length:', core.length);
-
-      return core;
-    } catch (error) {
-      console.error('Failed to initialize Hypercore:', error);
-      return null;
-    }
-  }
-
-  static async saveDrawingState(roomKey) {
-    if (!state.topicKey || !roomKey) {
-      console.warn('Cannot save: No active room');
-      return false;
-    }
-
-    try {
-      const core = await this.initCore(roomKey);
-      if (!core) return false;
-
-      const drawingData = {
-        version: state.doc.version,
-        order: [...state.doc.order],
-        objects: { ...state.doc.objects },
-        savedAt: Date.now(),
-        savedBy: state.localPeerId,
-        roomKey: roomKey
-      };
-
-      await core.append(drawingData);
-
-      console.log('Drawing state saved to Hypercore for room:', roomKey);
-      Log.logHypercoreData(drawingData, core.length - 1);
-
-      this.replicateToAllPeers(roomKey);
-
-      NetworkManager.broadcast({
-        t: 'hypercore_saved',
-        from: state.localPeerId,
-        roomKey: roomKey,
-        savedAt: drawingData.savedAt,
-        coreLength: core.length
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Failed to save to Hypercore:', error);
-      return false;
-    }
-  }
-
-  static async loadLatestDrawing(roomKey) {
-    try {
-      const core = await this.initCore(roomKey);
-      if (!core || core.length === 0) {
-        console.log('saved drawing found for room:', roomKey);
-        return false;
-      }
-
-      const latestIndex = core.length - 1;
-      const latestData = await core.get(latestIndex);
-
-      if (!latestData || !latestData.objects || !latestData.order) {
-        console.warn('Invalid drawing data in Hypercore');
-        return false;
-      }
-
-      console.log('Loading drawing from Hypercore for room:', roomKey);
-      Log.logHypercoreData(latestData, latestIndex);
-
-      // Apply loaded state WITHOUT triggering render twice
-      this.applyDrawingState(latestData);
-
-      // Broadcast to other peers that we've loaded
-      NetworkManager.broadcast({
-        t: 'hypercore_loaded',
-        from: state.localPeerId,
-        roomKey: roomKey,
-        loadedVersion: latestData.version
-      });
-
-      NetworkManager.broadcast({
-        t: 'full',
-        snapshot: NetworkManager.serializeDocument()
-      });
-
-      console.log('📤 Broadcasted loaded drawing to all connected peers');
-
-
-      return true;
-    } catch (error) {
-      console.error('âŒ Failed to load from Hypercore:', error);
-      return false;
-    }
-  }
-
-
-  static async saveDrawingState(roomKey) {
-    if (!state.topicKey || !roomKey) {
-      console.warn('Cannot save: No active room');
-      return false;
-    }
-
-    try {
-      const core = await this.initCore(roomKey);
-      if (!core) return false;
-
-      const drawingData = {
-        version: state.doc.version,
-        order: [...state.doc.order],
-        objects: { ...state.doc.objects },
-        savedAt: Date.now(),
-        savedBy: state.localPeerId,
-        roomKey: roomKey
-      };
-
-      await core.append(drawingData);
-
-      console.log('Drawing state saved to Hypercore for room:', roomKey);
-      Log.logHypercoreData(drawingData, core.length - 1);
-
-      this.replicateToAllPeers(roomKey);
-
-      NetworkManager.broadcast({
-        t: 'hypercore_saved',
-        from: state.localPeerId,
-        roomKey: roomKey,
-        savedAt: drawingData.savedAt,
-        coreLength: core.length
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Failed to save to Hypercore:', error);
-      return false;
-    }
-  }
-
-  static async loadLatestDrawing(roomKey) {
-    try {
-      const core = await this.initCore(roomKey);
-      if (!core || core.length === 0) {
-        console.log('No saved drawing found for room:', roomKey);
-        return false;
-      }
-
-      const latestIndex = core.length - 1;
-      const latestData = await core.get(latestIndex);
-
-      if (!latestData || !latestData.objects || !latestData.order) {
-        console.warn('Invalid drawing data in Hypercore');
-        return false;
-      }
-
-      console.log('Loading drawing from Hypercore for room:', roomKey);
-      Log.logHypercoreData(latestData, latestIndex);
-
-      this.applyDrawingState(latestData);
-
-      NetworkManager.broadcast({
-        t: 'hypercore_loaded',
-        from: state.localPeerId,
-        roomKey: roomKey,
-        loadedVersion: latestData.version
-      });
-
-      NetworkManager.broadcast({
-        t: 'full',
-        snapshot: NetworkManager.serializeDocument()
-      });
-
-      console.log('📤 Broadcasted loaded drawing to all connected peers');
-
-
-      return true;
-    } catch (error) {
-      console.error('Failed to load from Hypercore:', error);
-      return false;
-    }
-  }
-
-// FIXED: Apply drawing state without double rendering
-  static applyDrawingState(drawingData) {
-    // Temporarily disable render requests to prevent double rendering
-    const originalRequestRender = state.requestRender;
-    let renderRequested = false;
-
-    state.requestRender = () => {
-      renderRequested = true;
-    };
-
-    for (const id of drawingData.order) {
-      if (drawingData.objects[id] && !state.doc.objects[id]) {
-        // Only add objects that don't already exist
-        state.doc.objects[id] = drawingData.objects[id];
-        state.doc.order.push(id);
-      }
-    }
-
-    state.doc.version = Math.max(state.doc.version, drawingData.version || 0) + 1;
-
-    // Restore render function and trigger once if needed
-    state.requestRender = originalRequestRender;
-
-    if (renderRequested) {
-      state.requestRender();
-    }
-
-    console.log('Applied drawing state with', state.doc.order.length, 'objects');
-  }
-
-// NEW: Hypercore replication setup for peer synchronization
-  static setupReplication(roomKey, connection) {
-    const core = this.cores.get(roomKey);
-    if (!core || !connection.socket) return;
-
-    try {
-      const peerId = connection.peerId || 'unknown';
-      console.log(`Setting up Hypercore replication for ${roomKey} with peer ${peerId}`);
-
-      // Create replication stream
-      const stream = core.replicate(false, { live: true });
-
-      // Store replication stream
-      this.replicationStreams.set(peerId, { stream, core, roomKey });
-
-      // Pipe the replication stream to the socket
-      connection.socket.pipe(stream).pipe(connection.socket, { end: false });
-
-      // Handle replication events
-      stream.on('sync', () => {
-        console.log(`Hypercore synced with peer ${peerId}`);
-        // Reload drawing after sync
-        setTimeout(() => {
-          this.loadLatestDrawing(roomKey);
-        }, 500);
-      });
-
-      stream.on('error', (err) => {
-        console.error(`Replication error with peer ${peerId}:`, err)
-        this.replicationStreams.delete(peerId);
-      });
-
-      // Clean up on connection close
-      connection.socket.on('close', () => {
-        this.replicationStreams.delete(peerId);
-        console.log(`Replication stream closed for peer ${peerId}`);
-      });
-
-    } catch (error) {
-      console.error('Failed to setup Hypercore replication:', error);
-    }
-  }
-
-// NEW: Replicate to all connected peers
-  static replicateToAllPeers(roomKey) {
-    for (const connection of state.connections) {
-      if (!connection.closed) {
-        console.log('REPLICATion : ', connection.peerId);
-        this.setupReplication(roomKey, connection);
-      }
-    }
-  }
-
-  static async hasDrawings(roomKey) {
-    try {
-      const core = await this.initCore(roomKey);
-      return core && core.length > 0;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  static async deleteDrawings(roomKey) {
-    try {
-      const core = await this.initCore(roomKey)
-      if(!core || core.length === 0) {
-        console.log('No saved drawing found for room:', roomKey);
-        return false;
-      }
-
-      await core.clear(roomKey)
-      console.log('Cleared drawings for room:', roomKey);
-      return true;
-    } catch (e) {
-      console.error('Failed to clear the Hypercore of', roomKey, ':', e);
-      return false;
-    }
-  }
-
-// NEW: Get all drawing history with better formatting
-  static async getDrawingHistory(roomKey) {
-    try {
-      const core = await this.initCore(roomKey);
-      if (!core || core.length === 0) {
-        console.log('No drawing history found for room:', roomKey);
-        return [];
-      }
-
-      const history = [];
-      for (let i = 0; i < core.length; i++) {
-        const entry = await core.get(i);
-        history.push({
-          index: i,
-          timestamp: new Date(entry.savedAt).toLocaleString(),
-          savedBy: entry.savedBy,
-          objectCount: entry.order?.length || 0,
-          version: entry.version
-        });
-      }
-
-      console.log('Drawing history for room:', roomKey.substring(0, 8) + '...');
-      console.table(history);
-
-      return history;
-    } catch (error) {
-      console.error('Failed to get drawing history:', error);
-      return [];
-    }
-  }
-}
 
 // ============================================================================
 // CONSTANTS & CONFIGURATION
@@ -405,6 +56,7 @@ export const ui = {
   loadStateBtn: $('.load-state-btn'),
   slideStateContainer: $('#slide-state-container'),
   slideStateBtn: $('.slide-state-btn'),
+  slideStateCloseBtn: $('#slide-state-close-btn'),
 
   // Tools
   tools: $('#tools'),
@@ -2245,7 +1897,7 @@ class UIManager {
 
     const success = await room.addRoomState(state.topicKey);
     if (success) {
-      alert('Drawing state saved to Hypercore!');
+      alert('Drawing state saved to Hyperbee 🐝');
       // Show visual feedback
       ui.saveState.textContent = '';
       setTimeout(() => {
@@ -2333,10 +1985,9 @@ export class NetworkManager {
 
     console.log(`New peer connected: ${`peerId`}`);
 
-    // Setup Hypercore replication for this peer
     if (state.topicKey) {
       setTimeout(() => {
-        HypercoreManager.setupReplication(state.topicKey, connection);
+        room.setupReplication(state.topicKey, connection);
       }, 1000);
     }
 
@@ -2437,7 +2088,6 @@ export class NetworkManager {
       case 'hello':
         console.log(`Hello from peer: ${message.from}`);
         this.applySnapshot(message.doc);
-
         if (message.requestRoomDetails && message.roomKey === state.topicKey) {
           const roomRecord = await room.getRoom(message.roomKey);
           console.log(roomRecord)
@@ -2449,7 +2099,6 @@ export class NetworkManager {
             }, 500);
           }
         }
-
         if (state.doc.version > (message.doc?.version ?? -1)) {
           this.broadcast({
             t: 'full',
@@ -2457,11 +2106,9 @@ export class NetworkManager {
           });
         }
         break;
-
       case 'room_details':
         this.handleRoomDetailsMessage(message);
         break;
-
       case 'full':
         this.applySnapshot(message.snapshot);
         break;
@@ -2496,10 +2143,10 @@ export class NetworkManager {
         console.log(' Peer', message.from, 'loaded drawing from Hypercore, version:', message.loadedVersion);
         break;
       case 'room_state_added':
-        console.log('Room state added from peer', message.from, 'version:', message.version);
+        console.log('Room state added from peer', message.from, 'version:', message.drawingState.version);
         break;
-      case 'autobase_loaded':
-        console.log(' Peer', message.from, 'loaded drawing from Autobase, version:', message.loadedVersion);
+      case 'latestDrawing_loaded':
+        console.log(' Peer', message.from, 'loaded drawing from Autobase, version:', message.drawingState.loadedVersion);
         break;
     }
   }
@@ -2660,7 +2307,6 @@ class WhiteboardApp {
     InputHandler.init();
     CursorManager.init();
     UIManager.init();
-    await HypercoreManager.initCore()
 
     DrawingTools.selectTool('pen');
     state.strokeColor = ui.color.value;
@@ -2771,8 +2417,6 @@ if (!window.__WB_EVENTS_BOUND__) {
       console.log('Success', success)
       if (success) {
         alert('Drawing loaded successfully!');
-        // Show drawing history
-        HypercoreManager.getDrawingHistory(roomKey);
       } else {
         alert('No saved drawing found or failed to load');
       }
@@ -2781,10 +2425,99 @@ if (!window.__WB_EVENTS_BOUND__) {
     }
   });
 
-  ui.slideStateBtn.addEventListener('click', () => {
-    HypercoreManager.getDrawingHistory(ui.topicOut.getAttribute('data-value'))
+  ui.slideStateBtn.addEventListener('click', async () => {
+    const states = await room.loadAllStates(state.topicKey)
+    await displayStates(states)
   })
 
+  async function displayStates(states) {
+    const container = document.getElementById('slide-state-container');
+
+    // Show the container
+    container.classList.remove('hidden');
+
+    // Handle empty states
+    if (!states || states.length === 0) {
+      const emptyContainer = document.createElement('div');
+      emptyContainer.className = 'empty-states';
+      emptyContainer.innerHTML = `
+            <div class="states-container-header">
+                <h3>States</h3>
+                <button class="slide-state-close">
+                    <i class="fas fa-times"></i> Close
+                </button>
+            </div>
+            <p class="no-states-message">No states available</p>
+        `;
+
+      const closeButton = emptyContainer.querySelector('.slide-state-close');
+      closeButton.addEventListener('click', () => {
+        container.classList.add('hidden');
+      });
+
+      container.innerHTML = '';
+      container.appendChild(emptyContainer);
+      return;
+    }
+
+    // Create container header with close button
+    const containerHeader = document.createElement('div');
+    containerHeader.className = 'states-container-header';
+    containerHeader.innerHTML = `
+        <h3>States</h3>
+        <button class="slide-state-close">
+            <i class="fas fa-times"></i> Close
+        </button>
+    `;
+
+    // Add click handler to close button
+    const closeButton = containerHeader.querySelector('.slide-state-close');
+    closeButton.addEventListener('click', () => {
+      container.classList.add('hidden');
+    });
+
+    // Create states list
+    const statesList = document.createElement('ul');
+    statesList.className = 'states-list';
+
+    // Add states to the list
+    states.forEach((state, index) => {
+      const stateItem = document.createElement('li');
+      stateItem.className = 'state-item';
+
+      // Format timestamp
+      const timestamp = new Date(state.savedAt).toLocaleString();
+      const objectCount = state.order?.length || 0;
+
+      stateItem.innerHTML = `
+            <div class="state-info">
+                <span class="state-index">State ${index + 1}</span>
+                <span class="state-timestamp">${timestamp}</span>
+                <span class="object-count">Objects: ${objectCount}</span>
+                <span class="saved-by">Saved by: ${state.savedBy || 'Unknown'}</span>
+            </div>
+        `;
+
+      // Add click handler to load this state
+      stateItem.addEventListener('click', () => {
+        Room.applyDrawingState(state);
+        // Optionally close the panel after selecting a state
+        // container.classList.add('hidden');
+      });
+
+      statesList.appendChild(stateItem);
+    });
+
+    // Create wrapper for scrollable content
+    const contentWrapper = document.createElement('div');
+    contentWrapper.className = 'states-content-wrapper';
+    contentWrapper.appendChild(statesList);
+
+    // Clear container and add new elements
+    container.innerHTML = '';
+    container.appendChild(containerHeader);
+    container.appendChild(contentWrapper);
+  }
 // Enhanced room management
   document.getElementById('delete-state').addEventListener('click', async () => {
     const roomKey = document.getElementById('canvas-topic').getAttribute('data-value');
@@ -2795,7 +2528,7 @@ if (!window.__WB_EVENTS_BOUND__) {
 
     const confirmDelete = confirm(`Are you sure you want to delete all drawings in room "${roomKey}"?`);
     if (confirmDelete) {
-      const success = await HypercoreManager.deleteDrawings(roomKey);
+      const success = await room.deleteDrawings(roomKey);
       if (success) {
         alert('Room drawings deleted successfully');
         location.reload(); // Refresh the room list
@@ -2821,11 +2554,6 @@ if (!window.__WB_EVENTS_BOUND__) {
       if (topic) SessionManager.startSession(topic);
     });
   });
-
-// Add room history viewer
-  function showRoomHistory(roomKey) {
-    HypercoreManager.getDrawingHistory(roomKey);
-  }
 
   // const version = JSON.parse(fs.readFileSync('./package.json', 'utf8')).version
   // document.querySelector('#version').innerHTML = version;

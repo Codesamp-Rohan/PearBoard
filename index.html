@@ -31,8 +31,8 @@
   </div>
   <div id="create-join-container">
     <div id="room-name-form" class="hidden" style="display: flex; flex-direction: row; gap: 4px;">
-      <button class="button"  type="button" id="room-name-btn"><img class="icon" src="assets/icons/join.png" alt="icon" />Join</button>
-      <input required id="room-name-input" type="text" placeholder="Chat room Topic" />
+      <button class="button"  type="button" id="room-name-btn"><img class="icon" src="assets/icons/join.png" alt="icon" />Add Name</button>
+      <input required id="room-name-input" type="text" placeholder="Chat Name!!!" />
     </div>
   <div>
     <button class="button" id="create-canvas"><img class="icon" src="assets/icons/create.png" alt="icon" />Create</button>
@@ -105,7 +105,9 @@
       </div>
     </div>
   </div>
-  <div id="slide-state-container" class="hidden"></div>
+  <div id="slide-state-container" class="hidden">
+    <button id="slide-state-close-btn">Close</button>
+  </div>
   <div id="zoom-scale-display" style="">100%</div>
   <canvas id="board" aria-label="Drawing canvas"></canvas>
   <p id="mouse-follower">You</p>

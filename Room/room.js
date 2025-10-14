@@ -51,7 +51,7 @@ export class Room {
             states: [],
             createdAt: Date.now(),
             lastModified: Date.now(),
-            creator: {  // Add creator information
+            creator: {
                 peerId: state.localPeerId,
                 name: createdBy
             }
@@ -62,7 +62,6 @@ export class Room {
         console.log('Room added:', roomKey);
         return room;
     }
-
 
     async addRoomState(roomKey) {
         await this.ensureStorage();
@@ -100,14 +99,7 @@ export class Room {
         await roomDB.put(roomKey, updatedRoom);
         console.log('Room state added:', drawingState);
 
-        NetworkManager.broadcast({
-            t: 'room_state_added',
-            from: state.localPeerId,
-            roomKey: roomKey,
-            drawingState: drawingState,
-        });
-
-        console.log('Success!!');
+        Room.replicateToAllPeers(roomKey);
         return drawingState;
     }
 
@@ -130,16 +122,22 @@ export class Room {
     }
 
 
-    async loadAllRoomState(roomKey) {
+    async loadAllStates(roomKey) {
         await this.ensureStorage();
-        const node = await roomDB.get(roomKey);
-
-        if (!node || !node.value || !node.value.states || node.value.states.length === 0) {
-            console.log('No states found for room:', roomKey);
+        const room = await this.getRoom(roomKey);
+        if(!room) {
+            console.log('Room not found:', roomKey);
             return [];
         }
+        const node = room.states;
+        if(!(await this.hasDrawings(roomKey))) {
+            console.log('No drawings found.')
+            return null;
+        }
 
-        const validStates = node.value.states.filter(state =>
+        console.log('Node : ', node)
+
+        const validStates = node.filter(state =>
             state && state.objects && state.order
         );
 
@@ -147,28 +145,28 @@ export class Room {
             console.warn('No valid states found');
             return [];
         }
-
+        console.log('Valid States : ', validStates)
         console.log(`Loaded ${validStates.length} states for room:`, roomKey);
         return validStates;
     }
 
     async loadLatestRoomState(roomKey) {
         await this.ensureStorage();
-        const node = await roomDB.get(roomKey)
+        const node = await this.getRoom(roomKey)
 
-        if (!node || !node.value || !node.value.states || node.value.states.length === 0) {
-            console.log('No states found for room:', roomKey);
+        if(!(await this.hasDrawings(roomKey))) {
+            console.log('No drawings found.')
             return null;
         }
 
-        const lastIndex = node.value.states.length - 1;
-        const lastData = node.value.states[lastIndex];
+        const lastIndex = Room.lastIndex(node.value.states);
+        const lastData = Room.lastestData(lastIndex, node.value.states);
 
         console.log('Last Data : ', lastData)
         Room.applyDrawingState(lastData);
 
         NetworkManager.broadcast({
-            t: 'autobase_loaded',
+            t: 'latestDrawing_loaded',
             from: state.localPeerId,
             roomKey: roomKey,
             loadedVersion: node.value.states[lastIndex],
@@ -251,6 +249,25 @@ export class Room {
         return true;
     }
 
+    async hasDrawings(roomKey) {
+        try {
+            await this.ensureStorage()
+            const room = await this.getRoom(roomKey);
+            if(room.states.length > 0) {
+                return true;
+            } else {
+                return false;
+            }
+        } catch (e) {
+            console.error(e)
+            return false;
+        }
+    }
+
+    async deleteDrawings(roomKey) {
+        return null
+    }
+
     async getAllRooms() {
         await this.ensureStorage();
 
@@ -296,6 +313,49 @@ export class Room {
 
         NetworkManager.broadcast(message)
         console.log('Broadcast room details to all peers')
+    }
+
+    static setupReplication(roomKey, connection) {
+        if(!connection.closed) return;
+        try {
+            const peerId = connection.peerId || 'Unknown'
+            console.log('Setting up Room Replication for : ', peerId)
+            connection.socket.on('room_state_added', (message) => {
+                if (message.from !== state.localPeerId) {
+                    console.log(`Received room state from peer ${message.from}`);
+                    Room.applyDrawingState(message.drawingState);
+                }
+            });
+
+            connection.socket.on('room_details', (message) => {
+                if (message.from !== state.localPeerId) {
+                    console.log(`Received room details from peer ${message.from}`);
+                    globalState.updateRoom(message.roomKey, message.details);
+                }
+            });
+
+        } catch (e) {
+            console.error(e)
+            return null;
+        }
+    }
+
+    static replicateToAllPeers(roomKey) {
+        console.log('Replicating to all peers');
+        for (const connection of state.connections) {
+            if(!connection.closed) {
+                console.log('Setting Up Replication for : ', connection.peerId)
+                Room.setupReplication(roomKey, connection)
+            }
+        }
+    }
+
+    static lastIndex(arr) {
+        return arr.length - 1;
+    }
+
+    static lastestData(lastIndex, arr) {
+        return arr[lastIndex];
     }
 }
 

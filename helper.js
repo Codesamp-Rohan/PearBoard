@@ -30,3 +30,7 @@ if (!isMac) {
 document.querySelector('.slide-state-btn').addEventListener('click', () => {
     document.querySelector('#slide-state-container').classList.toggle('hidden');
 })
+
+document.querySelector('#slide-state-close-btn').addEventListener('click', () => {
+    document.querySelector('#state-details-container').classList.toggle('hidden');
+})
