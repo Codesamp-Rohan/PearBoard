@@ -8,18 +8,17 @@
   <link rel="stylesheet" href="./node_modules/@fortawesome/fontawesome-free/css/all.min.css">
 </head>
 <body>
-<p class="drag-msg">Use <b>shift</b> to drag</p>
 <button id="state-details" type="button">!</button>
 
 <div id="titlebar">
   <pear-ctrl></pear-ctrl>
-  <p id="version">1.0.6</p>
+  <p id="version">1.0.7</p>
 </div>
 
 <!--Canvas Create/Join Setup-->
-<div id="setup" style="z-index: 999;">
+<div id="setup" style="z-index: 999; overflow: hidden">
   <div id="rooms-list-container">
-    <div style="display: flex; flex-direction: column; gap: 4px; height: 90%">
+    <div style="display: flex; flex-direction: column; gap: 16px; height: 90%">
     <h5 style="padding: 0 8px">Canvas Room History</h5>
     <div id="rooms-list" class="">
     </div>
@@ -32,7 +31,7 @@
   <div id="create-join-container">
     <div id="room-name-form" class="hidden" style="display: flex; flex-direction: row; gap: 4px;">
       <button class="button"  type="button" id="room-name-btn"><img class="icon" src="assets/icons/join.png" alt="icon" />Add Name</button>
-      <input required id="room-name-input" type="text" placeholder="Chat Name!!!" />
+      <input required id="room-name-input" type="text" placeholder="Canvas Name!!!" />
     </div>
   <div>
     <button class="button" id="create-canvas"><img class="icon" src="assets/icons/create.png" alt="icon" />Create</button>
@@ -42,7 +41,7 @@
   </div>
   <div id="join-form" style="display: flex; flex-direction: row; gap: 4px;">
     <button class="button"  type="button" id="join-canvas"><img class="icon" src="assets/icons/join.png" alt="icon" />Join</button>
-    <input required id="join-canvas-topic" type="text" placeholder="Chat room Topic" />
+    <input required id="join-canvas-topic" type="text" placeholder="Canvas Topic!!!" />
   </div>
   </div>
 </div>
@@ -66,13 +65,39 @@
     <button id="delete-state" class="btn" title="Delete State">❌</button>
   </div>
   </div>
-  <div class="group">
-    <label class="label">Color <input id="color" type="color" value="#111111" style="padding: 0; width: 30px" /></label>
-    <label class="label">Size <input id="size" type="number" min="1" max="50" value="6" /></label>
-  </div>
-  <div class="group">
-    <label for="opacity-control" class="label">Opacity:</label>
-    <input type="range" id="opacity-control" min="0" max="1" step="0.05" value="1" />
+  <div class="drawing-controls">
+    <button type="button" id="toggleControls" class="controls-toggle" aria-label="Toggle drawing controls" aria-expanded="false">
+      <img class="icon" src="assets/icons/options.png" alt="Drawing options" />
+      <h5>Brush Settings</h5>
+    </button>
+
+    <div class="controls-container" id="controlsContainer">
+      <div class="group column" id="colorGroup">
+        <label class="label">Stroke</label>
+        <div style="width: 100%; display: flex; flex-direction: row; align-items: center; gap: 4px;">
+          <span style="width: 20px; height: 20px; overflow: hidden; border-radius: 12px;position: relative">
+            <input id="color" type="color" value="#111111" style="position: absolute;padding: 0;border: none;top: 50%;left: 50%;transform: translate(-50%, -46%);scale: 1.1;"/>
+          </span>
+          <p id="color-text">#111111</p>
+        </div>
+      </div>
+
+      <div class="group column" id="sizeGroup">
+        <div style="width: 100%; display: flex; flex-direction: row; align-items: center; justify-content: space-between">
+          <label class="label">Size: </label>
+          <p id="size-text">6px</p>
+        </div>
+        <input id="size" type="range" min="1" max="100" value="6" />
+      </div>
+
+      <div class="group column" id="opacityGroup">
+        <div style="width: 100%; display: flex; flex-direction: row; align-items: center; justify-content: space-between">
+          <label for="opacity-control" class="label">Opacity: </label>
+          <p id="opacity-text">1</p>
+        </div>
+        <input type="range" id="opacity-control" min="0" max="1" step="0.05" value="1" />
+      </div>
+    </div>
   </div>
 </header>
 
@@ -81,6 +106,7 @@
 
   <!--Floaters-->
   <div class="left-top-data">
+    <p class="drag-msg">Use <b>shift</b> to drag</p>
 <!--    Buttons-->
     <button class="load-state-btn" type="button">
       <p>💾 Load State</p>
@@ -108,7 +134,9 @@
   <div id="slide-state-container" class="hidden">
     <button id="slide-state-close-btn">Close</button>
   </div>
-  <div id="zoom-scale-display" style="">100%</div>
+  <div id="zoom-scale-display" style="">
+    <button class="zoom_min">-</button>100%<button class="zoom_max">+</button>
+  </div>
   <canvas id="board" aria-label="Drawing canvas"></canvas>
   <p id="mouse-follower">You</p>
 </main>

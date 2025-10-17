@@ -1042,15 +1042,17 @@ class HistoryManager {
     if (!entry) return;
 
     switch (entry.t) {
-      case 'del': // Undo add â†’ delete
+      case 'del':
         const obj = state.doc.objects[entry.id];
         if (obj) {
           DocumentManager.deleteObject(entry.id, false);
+          NetworkManager.queueOperation({ t: 'delete', id: entry.id });
           state.redoStack.push({ t: 'add', obj: entry.before });
         }
         break;
-      case 'add': // Undo delete â†’ add
+      case 'add':
         DocumentManager.addObject(entry.obj, false);
+        NetworkManager.queueOperation({ t: 'add', obj: entry.obj });
         state.redoStack.push({ t: 'del', id: entry.obj.id, before: entry.obj });
         break;
       case 'update':
@@ -1774,14 +1776,17 @@ class UIManager {
 
     ui.color.addEventListener('input', () => {
       state.strokeColor = ui.color.value;
+      document.querySelector('#color-text').textContent = state.strokeColor
     });
 
     ui.size.addEventListener('input', () => {
       state.strokeSize = parseInt(ui.size.value, 10);
+      document.querySelector('#size-text').textContent = state.strokeSize + ' px'
     });
 
     ui.opacitySlider.addEventListener('input', (e) => {
       state.strokeOpacity = parseFloat(e.target.value)
+      document.querySelector('#opacity-text').textContent = state.strokeOpacity
     })
 
     ui.undo.addEventListener('click', () => HistoryManager.undo());
@@ -1899,7 +1904,7 @@ class UIManager {
     if (success) {
       alert('Drawing state saved to Hyperbee 🐝');
       // Show visual feedback
-      ui.saveState.textContent = '';
+      ui.saveState.textContent = 'Savinggg';
       setTimeout(() => {
         ui.saveState.textContent = 'Save State';
       }, 2000);
@@ -2498,11 +2503,8 @@ if (!window.__WB_EVENTS_BOUND__) {
             </div>
         `;
 
-      // Add click handler to load this state
       stateItem.addEventListener('click', () => {
         Room.applyDrawingState(state);
-        // Optionally close the panel after selecting a state
-        // container.classList.add('hidden');
       });
 
       statesList.appendChild(stateItem);

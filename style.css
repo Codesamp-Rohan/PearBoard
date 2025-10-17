@@ -21,14 +21,14 @@ pear-ctrl[data-platform="darwin"] { margin-top: 12px; margin-left: 10px; }
 }
 
 :root{
-  --bg:#ffffff;
+  --bg: #e9edf1;
   --ink:#111;
   --muted:#e9edf1;
   --ui:#f8fafc;
   --btn: #fff;
   --btn-active:#e2e8f0;
   --shadow:0 6px 20px rgba(0,0,0,.08);
-  --list:#f0f0f0;
+  --list:#e9edf1;
   --list-active:#ebebeb;
 }
 
@@ -72,8 +72,9 @@ button, input, h4 {
   gap: 8px;
 }
 
-input {
-  width: 100%;
+input[type="range"] {
+  height: 4px;
+  padding: 0 !important;
 }
 
 #setup, #loading {
@@ -109,7 +110,6 @@ input {
 .toolbar{
   position: fixed;
   background: #fff;
-  padding: 12px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -156,7 +156,7 @@ input {
   width: 10px;
   height: 10px;
 }
-.label{display:flex; align-items:center; gap:6px; font-size:13px; color:#334155}
+.label{display:flex; align-items:center; gap:6px; font-size:11px; color:#334155}
 input[type="range"]{width:140px}
 p {
   font-size: 12px;
@@ -174,7 +174,7 @@ p {
 }
 #board{
   position:absolute;
-  top: 32px;
+  top: 28px;
   display:block; width:100%; height:100%;
   background:#ebebeb; cursor:crosshair;
 }
@@ -458,4 +458,97 @@ li:hover{background:var(--list-active)}
   font-size: 12px;
   color: #fff;
   border: #cc0000;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.drawing-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px;
+}
+
+.controls-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 8px;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.controls-container.group{
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.controls-container.hidden {
+  transform: translateX(-10px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.controls-toggle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+  gap: 8px;
+}
+
+.controls-toggle:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* For WebKit browsers (Chrome, Safari, Edge) */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: #e0dfff; /* track color */
+  border-radius: 4px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 12px;
+  width: 12px;
+  background: #e0dfff; /* thumb color */
+  cursor: pointer;
+  border-radius: 50%;
+  margin-top: -6px; /* vertically center the thumb */
+  position: relative;
+}
+
+/* For Firefox */
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  background: #e0dfff; /* track color */
+  border-radius: 4px;
+}
+
+/* For IE */
+input[type="range"]::-ms-track {
+  height: 6px;
+  background: transparent;
+  border-color: transparent;
+  border-width: 6px 0;
+  color: transparent;
+}
+
+input[type="range"]::-ms-fill-lower {
+  background: #e0dfff; /* track lower color */
+  border-radius: 4px;
+}
+
+input[type="range"]::-ms-fill-upper {
+  background: #ccc; /* track upper color */
+  border-radius: 4px;
 }

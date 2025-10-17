@@ -159,8 +159,10 @@ export class Room {
             return null;
         }
 
-        const lastIndex = Room.lastIndex(node.value.states);
-        const lastData = Room.lastestData(lastIndex, node.value.states);
+        console.log(node.states)
+
+        const lastIndex = Room.lastIndex(node.states);
+        const lastData = Room.lastestData(lastIndex, node.states);
 
         console.log('Last Data : ', lastData)
         Room.applyDrawingState(lastData);
@@ -169,7 +171,7 @@ export class Room {
             t: 'latestDrawing_loaded',
             from: state.localPeerId,
             roomKey: roomKey,
-            loadedVersion: node.value.states[lastIndex],
+            loadedVersion: node.states[lastIndex],
         })
 
         NetworkManager.broadcast({
@@ -191,7 +193,6 @@ export class Room {
 
         for (const id of drawingData.order) {
             if (drawingData.objects[id] && !state.doc.objects[id]) {
-                // Only add objects that don't already exist
                 state.doc.objects[id] = drawingData.objects[id];
                 state.doc.order.push(id);
             }
@@ -201,10 +202,8 @@ export class Room {
 
         state.requestRender = originalRequestRender;
 
-        if (renderRequested) {
-            state.requestRender();
-        }
-
+        state.requestRender();
+        state.dirty = true;
         console.log('Applied drawing state with', state.doc.order.length, 'objects');
     }
 
