@@ -72,6 +72,8 @@ export const ui = {
   namePopup: $('#name--input--popup'),
 
   // Canvas
+  zoomMin: $('.zoom_min'),
+  zoomMax: $('.zoom_max'),
   scaleDisplay: $('#zoom-scale-display'),
   opacitySlider: $('#opacity-control'),
 };
@@ -110,13 +112,29 @@ class CoordinateUtils {
 // CANVAS MANAGEMENT
 // ============================================================================
 
-class CanvasManager {
+export class CanvasManager {
   static init() {
     state.ctx = ui.canvas.getContext('2d', { alpha: true });
     this.resizeCanvas();
     this.setupEventListeners();
     this.startRenderLoop();
     this.renderFrame();
+  }
+
+  static generateThumbnail(canvas, maxWidth = 300, maxHeight = 150) {
+    const tmpCanvas = document.createElement('canvas')
+    const ctx = tmpCanvas.getContext('2d')
+
+    const ratio = Math.min(maxWidth / canvas.width, maxHeight / canvas.height)
+    tmpCanvas.width = canvas.width * ratio;
+    tmpCanvas.height = canvas.height * ratio;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, tmpCanvas.width, tmpCanvas.height);
+    ctx.scale(ratio, ratio);
+    ctx.drawImage(canvas, 0, 0);
+
+    return tmpCanvas.toDataURL('image/png');
   }
 
   static resizeCanvas() {
@@ -130,18 +148,22 @@ class CanvasManager {
     state.requestRender();
   }
 
+
   static clampPan() {
     const viewWidthWorld = ui.canvas.clientWidth / state.zoom;
     const viewHeightWorld = ui.canvas.clientHeight / state.zoom;
-    let leftWorld = -state.panX / state.zoom;
-    let topWorld = -state.panY / state.zoom;
 
-    // Clamp to world boundaries
-    leftWorld = Math.max(0, Math.min(leftWorld, CONFIG.WORLD_WIDTH - viewWidthWorld));
-    topWorld = Math.max(0, Math.min(topWorld, CONFIG.WORLD_HEIGHT - viewHeightWorld));
+    const leftWorld = -state.panX / state.zoom;
+    const topWorld = -state.panY / state.zoom;
 
-    state.panX = -leftWorld * state.zoom;
-    state.panY = -topWorld * state.zoom;
+    const maxPanX = CONFIG.WORLD_WIDTH - viewWidthWorld;
+    const maxPanY = CONFIG.WORLD_HEIGHT - viewHeightWorld;
+
+    const clampedLeftWorld = Math.max(0, Math.min(leftWorld, maxPanX));
+    const clampedTopWorld = Math.max(0, Math.min(topWorld, maxPanY));
+
+    state.panX = -clampedLeftWorld * state.zoom;
+    state.panY = -clampedTopWorld * state.zoom;
   }
 
   static centerView() {
@@ -165,29 +187,61 @@ class CanvasManager {
       e.preventDefault();
       this.handleWheel(e);
     }, { passive: false });
+
+    ui.zoomMax.addEventListener('click', () => {
+      this.handleZoomButton(CONFIG.ZOOM_STEP);
+    });
+
+    ui.zoomMin.addEventListener('click', () => {
+      this.handleZoomButton(1 / CONFIG.ZOOM_STEP);
+    });
   }
 
-  static handleWheel(event) {
-    const factor = (event.deltaY < 0) ? CONFIG.ZOOM_STEP : (1 / CONFIG.ZOOM_STEP);
-    const rect = ui.canvas.getBoundingClientRect();
-    const clientX = event.clientX - rect.left;
-    const clientY = event.clientY - rect.top;
+  static handleZoomButton(zoomFactor) {
+    const newZoom = Math.min(
+        CONFIG.MAX_ZOOM,
+        Math.max(CONFIG.MIN_ZOOM, state.zoom * zoomFactor)
+    );
 
-    const newZoom = Math.min(CONFIG.MAX_ZOOM, Math.max(CONFIG.MIN_ZOOM, state.zoom * factor));
-    const worldX = (clientX - state.panX) / state.zoom;
-    const worldY = (clientY - state.panY) / state.zoom;
+    if (newZoom === state.zoom) return;
+    const rect = ui.canvas.getBoundingClientRect();
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    const worldX = (centerX - state.panX) / state.zoom;
+    const worldY = (centerY - state.panY) / state.zoom;
 
     state.zoom = newZoom;
-    state.panX = clientX - worldX * state.zoom;
-    state.panY = clientY - worldY * state.zoom;
 
-    // Scale Percentage
-    const scalePercent = Math.round(state.zoom * 100);
-    const scaleDisplay = document.getElementById('zoom-scale-display');
-    if (scaleDisplay) {
-      scaleDisplay.textContent = scalePercent + '%';
-    }
+    state.panX = centerX - (worldX * newZoom);
+    state.panY = centerY - (worldY * newZoom);
 
+    const scalePercent = Math.round(newZoom * 100);
+    ui.scaleDisplay.textContent = `${scalePercent}%`;
+
+    this.clampPan();
+    state.requestRender();
+    CursorManager.handleCanvasTransform();
+  }
+
+
+  static handleWheel(event) {
+    event.preventDefault();
+    const zoomFactor = event.deltaY < 0 ? CONFIG.ZOOM_STEP : 1 / CONFIG.ZOOM_STEP;
+    const newZoom = Math.min(
+        CONFIG.MAX_ZOOM,
+        Math.max(CONFIG.MIN_ZOOM, state.zoom * zoomFactor)
+    );
+    if (newZoom === state.zoom) return;
+    const rect = ui.canvas.getBoundingClientRect();
+    const mouseX = event.clientX - rect.left;
+    const mouseY = event.clientY - rect.top;
+    const worldX = (mouseX - state.panX) / state.zoom;
+    const worldY = (mouseY - state.panY) / state.zoom;
+    state.zoom = newZoom;
+    state.panX = mouseX - (worldX * newZoom);
+    state.panY = mouseY - (worldY * newZoom);
+    const scalePercent = Math.round(newZoom * 100);
+    ui.scaleDisplay.textContent = `${scalePercent}%`;
     this.clampPan();
     state.requestRender();
     CursorManager.handleCanvasTransform();
@@ -2437,11 +2491,21 @@ if (!window.__WB_EVENTS_BOUND__) {
 
   async function displayStates(states) {
     const container = document.getElementById('slide-state-container');
+    const slideStateBtn = document.querySelector('.slide-state-btn');
 
-    // Show the container
+    document.addEventListener('click', (event) => {
+      if (container && !container.classList.contains('hidden')) {
+        if (!container.contains(event.target) && !slideStateBtn.contains(event.target)) {
+          container.classList.add('hidden');
+        }
+      }
+    });
+
+    container.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
     container.classList.remove('hidden');
 
-    // Handle empty states
     if (!states || states.length === 0) {
       const emptyContainer = document.createElement('div');
       emptyContainer.className = 'empty-states';
@@ -2449,7 +2513,7 @@ if (!window.__WB_EVENTS_BOUND__) {
             <div class="states-container-header">
                 <h3>States</h3>
                 <button class="slide-state-close">
-                    <i class="fas fa-times"></i> Close
+                    <i class="fas fa-times"></i>
                 </button>
             </div>
             <p class="no-states-message">No states available</p>
@@ -2471,7 +2535,7 @@ if (!window.__WB_EVENTS_BOUND__) {
     containerHeader.innerHTML = `
         <h3>States</h3>
         <button class="slide-state-close">
-            <i class="fas fa-times"></i> Close
+            <i class="fas fa-times"></i>
         </button>
     `;
 
@@ -2495,13 +2559,27 @@ if (!window.__WB_EVENTS_BOUND__) {
       const objectCount = state.order?.length || 0;
 
       stateItem.innerHTML = `
-            <div class="state-info">
-                <span class="state-index">State ${index + 1}</span>
-                <span class="state-timestamp">${timestamp}</span>
-                <span class="object-count">Objects: ${objectCount}</span>
-                <span class="saved-by">Saved by: ${state.savedBy || 'Unknown'}</span>
+            <div class="state-info" data-index="${index}">
+                <img class="state-thumbnail" src="${state.thumbnail}" alt="State preview">
+                <div class="state-details">
+                    <div class="state-index">State ${index + 1}</div>
+                    <div class="state-timestamp">${new Date(state.savedAt).toLocaleString()}</div>
+                    <div class="object-count">${state.order?.length || 0} objects</div>
+                    <div class="saved-by">by ${state.savedBy}</div>
+                </div>
+                <i class="fas fa-trash delete-state" title="Delete room"></i>
             </div>
         `;
+
+      const deleteButton = stateItem.querySelector('.delete-state');
+      deleteButton.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation()
+        const updatedStates = await room.deleteState(state.roomKey, index);
+        console.log('Updated states:', updatedStates)
+        await displayStates(updatedStates)
+        alert('State deleted successfully!');
+      })
 
       stateItem.addEventListener('click', () => {
         Room.applyDrawingState(state);

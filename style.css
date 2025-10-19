@@ -239,6 +239,7 @@ p {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow-y: scroll;
 }
 
 .states-container-header {
@@ -334,7 +335,7 @@ li:hover{background:var(--list-active)}
   height: 90%;
 }
 
-.room-list .delete-icon {
+.room-list .delete-icon, .state-info .delete-state {
   position: absolute;
   right: -40px;
   top: 50%;
@@ -345,7 +346,7 @@ li:hover{background:var(--list-active)}
   transition: right 0.3s ease;
 }
 
-.room-list:hover .delete-icon {
+.room-list:hover .delete-icon, .state-info .delete-state {
   right: 16px;
 }
 
@@ -380,15 +381,13 @@ li:hover{background:var(--list-active)}
   position: fixed;
   bottom: 10px;
   left: 10px;
-  background: rgba(0, 0, 0, 0.6);
-  color: white;
+  background: rgba(255, 255, 255);
+  color: #000;
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 14px;
   font-family: monospace;
   z-index: 10000;
-  user-select: none;
-  pointer-events: none;
 }
 
 #peer-count-btn {
@@ -413,6 +412,32 @@ li:hover{background:var(--list-active)}
   justify-content: center;
   gap: 12px;
 }
+.state-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #e9edf1;
+  padding: 12px;
+  border-radius: 7px;
+}
+
+.state-thumbnail {
+  width: 100%;
+  height: 150px;
+  border-radius: 4px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid var(--muted);
+}
+
+.state-details {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  flex-direction: column;
+}
+
 #state-details {
   position: fixed;
   bottom: 3px;
@@ -435,8 +460,8 @@ li:hover{background:var(--list-active)}
 }
 
 .icon {
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
 }
 
 #version {

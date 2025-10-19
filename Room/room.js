@@ -1,9 +1,8 @@
 import Corestore from 'corestore';
 import Hyperbee from 'hyperbee';
-import {NetworkManager, PEAR_PATH} from '../app.js';
+import {CanvasManager, NetworkManager, PEAR_PATH, ui} from '../app.js';
 import {globalState} from "../storage/GlobalState.js";
 import {state} from "../storage/AppState.js";
-import log from "../logs/log.js";
 
 let roomDB;
 let isStorageInitialized = false;
@@ -81,13 +80,16 @@ export class Room {
             room.states = [];
         }
 
+        const thumbnail = CanvasManager.generateThumbnail(ui.canvas);
+
         const drawingState = {
             version: state.doc.version,
             order: [...state.doc.order],
             objects: {...state.doc.objects},
             savedAt: Date.now(),
             savedBy: state.localPeerId,
-            roomKey: roomKey
+            roomKey: roomKey,
+            thumbnail: thumbnail,
         };
 
         const updatedRoom = {
@@ -104,7 +106,49 @@ export class Room {
     }
 
 
-    async getRoomStates(roomKey) {
+    async deleteState(roomKey, index) {
+        try {
+            await this.ensureStorage();
+            const room = await this.getRoom(roomKey);
+
+            if (!room || !room.states) {
+                console.warn('No room or states found for:', roomKey);
+                return false;
+            }
+
+            if (index < 0 || index >= room.states.length) {
+                console.warn('Invalid state index:', index);
+                return false;
+            }
+
+            const updatedStates = [...room.states];
+            updatedStates.splice(index, 1);
+
+            const updatedRoom = {
+                ...room,
+                states: updatedStates,
+                lastModified: Date.now()
+            };
+
+            await roomDB.put(roomKey, updatedRoom);
+
+            console.log(`State at index ${index} deleted from room:`, roomKey);
+
+            NetworkManager.broadcast({
+                t: 'state_deleted',
+                from: state.localPeerId,
+                roomKey,
+                deletedIndex: index
+            });
+
+            return updatedStates;
+        } catch (error) {
+            console.error('Error deleting state:', error);
+            return false;
+        }
+    }
+
+    async getRoomState(roomKey) {
         await this.ensureStorage();
         const room = await this.getRoom(roomKey);
 
@@ -129,12 +173,12 @@ export class Room {
             console.log('Room not found:', roomKey);
             return [];
         }
-        const node = room.states;
         if(!(await this.hasDrawings(roomKey))) {
             console.log('No drawings found.')
             return null;
         }
 
+        const node = room.states;
         console.log('Node : ', node)
 
         const validStates = node.filter(state =>
@@ -212,8 +256,6 @@ export class Room {
         const node = await roomDB.get(roomKey);
         return node ? node.value : null;
     }
-
-
 
     async updateRoom(roomKey, roomDetails) {
         await this.ensureStorage();
