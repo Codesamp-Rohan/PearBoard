@@ -7,9 +7,8 @@ pear-ctrl[data-platform="darwin"] { margin-top: 12px; margin-left: 10px; }
   position: fixed;
   left: 0;
   top: 0;
-  background-color: #B0D94413;
-  /*filter: drop-shadow(2px 10px 6px #888);*/
-  z-index: 9999;
+  background-color: #e9edf1;
+  z-index: 9998;
 }
 
 #create-join-container {
@@ -22,14 +21,14 @@ pear-ctrl[data-platform="darwin"] { margin-top: 12px; margin-left: 10px; }
 }
 
 :root{
-  --bg:#ffffff;
+  --bg: #e9edf1;
   --ink:#111;
   --muted:#e9edf1;
   --ui:#f8fafc;
   --btn: #fff;
   --btn-active:#e2e8f0;
   --shadow:0 6px 20px rgba(0,0,0,.08);
-  --list:#f0f0f0;
+  --list:#e9edf1;
   --list-active:#ebebeb;
 }
 
@@ -73,8 +72,9 @@ button, input, h4 {
   gap: 8px;
 }
 
-input {
-  width: 100%;
+input[type="range"] {
+  height: 4px;
+  padding: 0 !important;
 }
 
 #setup, #loading {
@@ -110,7 +110,6 @@ input {
 .toolbar{
   position: fixed;
   background: #fff;
-  padding: 12px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -157,7 +156,7 @@ input {
   width: 10px;
   height: 10px;
 }
-.label{display:flex; align-items:center; gap:6px; font-size:13px; color:#334155}
+.label{display:flex; align-items:center; gap:6px; font-size:11px; color:#334155}
 input[type="range"]{width:140px}
 p {
   font-size: 12px;
@@ -175,7 +174,7 @@ p {
 }
 #board{
   position:absolute;
-  top: 32px;
+  top: 28px;
   display:block; width:100%; height:100%;
   background:#ebebeb; cursor:crosshair;
 }
@@ -231,12 +230,76 @@ p {
   width: 30vw;
   height: 100%;
   position: fixed;
-  top: 128px;
+  top: 0;
   right: 0;
-  z-index: 100;
+  z-index: 1000;
   background-color: #f8f9fa;
   border-right: 3px solid var(--muted);
+  padding: 48px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: scroll;
+}
+
+.states-container-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.states-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.state-item {
+  padding: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+
+}
+
+#slide-state-close {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  font-size: 12px;
+}
+
+.state-info:hover {
+  background-color: #ddd;
+}
+
+.state-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  flex-direction: column;
+  background: #e9edf1;
   padding: 12px;
+  border-radius: 7px;
+}
+
+.state-index {
+  font-weight: bold;
+}
+
+.state-timestamp {
+  color: #666;
+}
+
+.object-count {
+  color: #444;
+}
+
+.saved-by {
+  color: #555;
+  font-style: italic;
 }
 
 ul{
@@ -272,7 +335,7 @@ li:hover{background:var(--list-active)}
   height: 90%;
 }
 
-.room-list .delete-icon {
+.room-list .delete-icon, .state-info .delete-state {
   position: absolute;
   right: -40px;
   top: 50%;
@@ -283,7 +346,7 @@ li:hover{background:var(--list-active)}
   transition: right 0.3s ease;
 }
 
-.room-list:hover .delete-icon {
+.room-list:hover .delete-icon, .state-info .delete-state {
   right: 16px;
 }
 
@@ -318,15 +381,13 @@ li:hover{background:var(--list-active)}
   position: fixed;
   bottom: 10px;
   left: 10px;
-  background: rgba(0, 0, 0, 0.6);
-  color: white;
+  background: rgba(255, 255, 255);
+  color: #000;
   padding: 4px 8px;
   border-radius: 4px;
   font-size: 14px;
   font-family: monospace;
   z-index: 10000;
-  user-select: none;
-  pointer-events: none;
 }
 
 #peer-count-btn {
@@ -351,11 +412,37 @@ li:hover{background:var(--list-active)}
   justify-content: center;
   gap: 12px;
 }
+.state-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #e9edf1;
+  padding: 12px;
+  border-radius: 7px;
+}
+
+.state-thumbnail {
+  width: 100%;
+  height: 150px;
+  border-radius: 4px;
+  object-fit: contain;
+  background: #fff;
+  border: 1px solid var(--muted);
+}
+
+.state-details {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  flex-direction: column;
+}
+
 #state-details {
   position: fixed;
-  top: 3px;
+  bottom: 3px;
   right: 48px;
-  z-index: 1001;
+  z-index: 9999;
   font-size: 12px;
   padding: 4px 16px;
   border-radius: 8px;
@@ -373,8 +460,8 @@ li:hover{background:var(--list-active)}
 }
 
 .icon {
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
 }
 
 #version {
@@ -396,4 +483,97 @@ li:hover{background:var(--list-active)}
   font-size: 12px;
   color: #fff;
   border: #cc0000;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.drawing-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px;
+}
+
+.controls-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 8px;
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.controls-container.group{
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.controls-container.hidden {
+  transform: translateX(-10px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.controls-toggle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+  gap: 8px;
+}
+
+.controls-toggle:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* For WebKit browsers (Chrome, Safari, Edge) */
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: #e0dfff; /* track color */
+  border-radius: 4px;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  height: 12px;
+  width: 12px;
+  background: #e0dfff; /* thumb color */
+  cursor: pointer;
+  border-radius: 50%;
+  margin-top: -6px; /* vertically center the thumb */
+  position: relative;
+}
+
+/* For Firefox */
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  background: #e0dfff; /* track color */
+  border-radius: 4px;
+}
+
+/* For IE */
+input[type="range"]::-ms-track {
+  height: 6px;
+  background: transparent;
+  border-color: transparent;
+  border-width: 6px 0;
+  color: transparent;
+}
+
+input[type="range"]::-ms-fill-lower {
+  background: #e0dfff; /* track lower color */
+  border-radius: 4px;
+}
+
+input[type="range"]::-ms-fill-upper {
+  background: #ccc; /* track upper color */
+  border-radius: 4px;
 }
