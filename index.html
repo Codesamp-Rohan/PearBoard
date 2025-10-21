@@ -6,6 +6,9 @@
   <title>Whiteboard — Vanilla JS</title>
   <link rel="stylesheet" href="./style.css" />
   <link rel="stylesheet" href="./node_modules/@fortawesome/fontawesome-free/css/all.min.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap" rel="stylesheet">
 </head>
 <body>
 <button id="state-details" type="button">!</button>
@@ -45,22 +48,24 @@
   </div>
   </div>
 </div>
-<div id="loading" class="hidden">Loading ...</div>
+<div id="loading" class="loader-container hidden">
+  <div class="loader"></div>
+</div>
 <header class="toolbar hidden" role="toolbar" aria-label="Whiteboard toolbar">
   <div class="btn--container">
   <div class="group" id="tools" style="gap: 4px;">
-    <button class="btn active" data-tool="pen" title="Pen (P)"><img class="icon" src="assets/icons/pen.png" alt="icon" /></button>
-    <button class="btn" data-tool="eraser" title="Eraser (E)">🧽</button>
-    <button class="btn" data-tool="line" title="Line (L)">／</button>
-    <button class="btn" data-tool="rect" title="Rectangle (R)">▭</button>
-    <button class="btn" data-tool="ellipse" title="Ellipse (O)">⬭</button>
-    <button class="btn" data-tool="diamond" title="Diamond (D)">⬥</button>
-    <button class="btn" data-tool="text" title="Text (T)">🅣</button>
-    <button class="btn" data-tool="hand" title="Hand (H)">✋🏿</button>
-    <button id="undo" class="btn" title="Undo (Ctrl/Cmd+Z)"><i class="fas fa-undo undo-icon" title="Undo"></i></button>
-    <button id="redo" class="btn" title="Redo (Ctrl/Cmd+Shift+Z)"><i class="fas fa-redo redo-icon" title="Redo"></i></button>
+    <button class="btn active" data-tool="pen" title="Pen (P)"><img class="icon" src="./assets/icons/pen.png" alt="icon" /></button>
+    <button class="btn" data-tool="eraser" title="Eraser (E)"><img class="icon" src="assets/icons/eraser.png" alt="icon" /></button>
+    <button class="btn" data-tool="line" title="Line (L)"><img class="icon" src="assets/icons/line.png" alt="icon" /></button>
+    <button class="btn" data-tool="rect" title="Rectangle (R)"><img class="icon" src="assets/icons/rect.png" alt="icon" /></button>
+    <button class="btn" data-tool="ellipse" title="Ellipse (O)"><img class="icon" src="assets/icons/ellipse.png" alt="icon" /></button>
+    <button class="btn" data-tool="diamond" title="Diamond (D)"><img class="icon" src="assets/icons/diamond.png" alt="icon" /></button>
+    <button class="btn" data-tool="text" title="Text (T)"><img class="icon" src="assets/icons/text.png" alt="icon" /></button>
+    <button class="btn" data-tool="hand" title="Hand (H)"><img class="icon" src="assets/icons/hand.png" alt="icon" /></button>
+    <button id="undo" class="btn" title="Undo (Ctrl/Cmd+Z)"><img class="icon" src="assets/icons/undo.png" alt="icon" /></button>
+    <button id="redo" class="btn" title="Redo (Ctrl/Cmd+Shift+Z)"><img class="icon" src="assets/icons/redo.png" alt="icon" /></button>
     <button id="clear" class="btn" title="Clear"><img src="./assets/icons/clean.png" class="icon" alt="clean-icon"></button>
-    <button id="save" class="btn" title="Save PNG"><i class="fas fa-download download-icon" title="Download room"></i></button>
+    <button id="save" class="btn" title="Save PNG"><img class="icon" src="assets/icons/download.png" alt="icon" /></button>
     <button id="save-state" class="btn" title="Save State">Save State</button>
     <button id="delete-state" class="btn" title="Delete State">❌</button>
   </div>
@@ -68,7 +73,7 @@
   <div class="drawing-controls">
     <button type="button" id="toggleControls" class="controls-toggle" aria-label="Toggle drawing controls" aria-expanded="false">
       <img class="icon" src="assets/icons/options.png" alt="Drawing options" />
-      <h5>Brush Settings</h5>
+      <h5>Stroke Settings</h5>
     </button>
 
     <div class="controls-container" id="controlsContainer">
@@ -90,7 +95,7 @@
         <input id="size" type="range" min="1" max="100" value="6" />
       </div>
 
-      <div class="group column" id="opacityGroup">
+      <div class="group column" style="padding-bottom: 8px;" id="opacityGroup">
         <div style="width: 100%; display: flex; flex-direction: row; align-items: center; justify-content: space-between">
           <label for="opacity-control" class="label">Opacity: </label>
           <p id="opacity-text">1</p>
@@ -105,32 +110,67 @@
 <main class="board-wrap hidden">
 
   <!--Floaters-->
-  <div class="left-top-data">
-    <p class="drag-msg">Use <b>shift</b> to drag</p>
-<!--    Buttons-->
-    <button class="load-state-btn" type="button">
-      <p>💾 Load State</p>
+  <div class="right-top-data">
+    <button type="button" id="toggleRightPanel" class="controls-toggle" aria-label="Toggle right panel" aria-expanded="false">
+      <h5>Canvas Info</h5>
+      <img class="icon" src="assets/icons/setting.png" alt="Options" />
     </button>
-    <button class="slide-state-btn" type="button">
-      <p>💾 Slide State</p>
-    </button>
-    <button class="canvas-room-key hidden" type="button">
-      <p>Canvas Topic</p><p id="canvas-topic"></p><img class="icon" src="./assets/icons/copy.png" alt="copy-img">
-    </button>
-    <button class="group hidden" type="button" id="peer-count-btn">
-      <p>Peers Count : </p><p id="peers-count">1</p>
-    </button>
-    <div>
-      <button style="display: flex; flex-direction: row; align-items: center; gap: 4px;" class="button peer-name-container" type="button">
-        <p id="local-peer-name" class="name--btn"></p>
-        <img class="icon" src="./assets/icons/arrow.png" alt="copy-img">
-      </button>
-      <div class="hidden" id="name--input--popup">
-        <input style="font-size: 12px;" id="username-input" placeholder="Enter your name" />
-        <button style="font-size: 12px;" id="username-submit">Submit</button>
+
+    <div class="right-panel-container hidden" id="rightPanelContainer">
+      <div class="panel-group">
+        <p class="drag-msg">Use <b>shift</b> to drag</p>
+
+        <button class="load-state-btn" type="button">
+          <img class="icon" src="./assets/icons/load.png" alt="load-img">
+          <div class="text-container">
+            <h5>Load Latest State</h5>
+            <p>Click to load the last state you saved.</p>
+          </div>
+        </button>
+
+        <button class="slide-state-btn" type="button">
+          <img class="icon" src="./assets/icons/slide.png" alt="load-img">
+          <div class="text-container">
+            <h5>Slide State</h5>
+            <p>Click to open all states and load accordingly.</p>
+          </div>
+        </button>
+
+        <div class="divider"></div>
+
+        <button class="canvas-room-key hidden" type="button">
+          <img class="icon" src="./assets/icons/copy.png" alt="copy-img">
+          <div class="text-container">
+            <h5>Canvas Topic</h5>
+            <p id="canvas-topic" class="truncate-28"></p>
+          </div>
+        </button>
+
+        <button class="hidden" type="button" id="peer-count-btn">
+          <img class="icon" src="./assets/icons/peers.png" alt="copy-img">
+          <div class="text-container">
+            <h5>Peer Count</h5>
+            <p id="peers-count">1</p>
+          </div>
+        </button>
+
+        <div class="divider"></div>
+
+        <div class="name-container">
+          <button class="button peer-name-container" type="button">
+            <img class="icon" src="./assets/icons/arrow.png" alt="copy-img">
+            <p id="local-peer-name" class="name--btn"></p>
+          </button>
+          <div class="hidden" id="name--input--popup">
+            <input style="font-size: 12px; width: 100%" id="username-input" placeholder="Enter your name" />
+            <button style="font-size: 12px;" id="username-submit">Submit</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
+
+
   <div id="slide-state-container" class="hidden">
     <button id="slide-state-close-btn">Close</button>
   </div>
