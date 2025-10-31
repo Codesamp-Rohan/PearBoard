@@ -58,6 +58,10 @@ export const ui = {
   slideStateBtn: $('.slide-state-btn'),
   slideStateCloseBtn: $('#slide-state-close-btn'),
 
+  slideIconBtn: $('#slide-icon-btn'),
+  slideIconContainer: $('#slide-icon-container'),
+  slideIconCloseBtn: $('#slide-icon-close-btn'),
+
   // Tools
   tools: $('#tools'),
   color: $('#color'),
@@ -1068,7 +1072,7 @@ class TextEditor {
   }
 
   static createEditorElement(x, y, textObj, fontPixels, initialText) {
-    const div = document.createElement('div');
+    const div = document.createElement('textarea');
     div.className = 'text-editor';
     div.contentEditable = 'true';
     div.dataset.id = textObj.id;
@@ -1089,10 +1093,11 @@ class TextEditor {
       outline: 'none',
       boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
       zIndex: '9999',
-      whiteSpace: 'nowrap',
+      whiteSpace: 'pre-wrap',
       overflow: 'visible',
       minWidth: '20px',
       minHeight: '16px',
+      maxWidth: '400px',
       transformOrigin: 'top left',
       transform: state.zoom !== 1 ? `scale(${state.zoom})` : 'none'
     });
@@ -1128,26 +1133,38 @@ class TextEditor {
   }
 
   static commit() {
-    if (!state.textEl) return;
+    // Capture and clear the editor element from state immediately
+    const editorDiv = state.textEl;
+    state.textEl = null;
+    state.activeId = null;
 
-    const id = state.textEl.dataset.id;
+    // If there's no active editor, nothing to do
+    if (!editorDiv) return;
+
+    const id = editorDiv.dataset.id;
     const obj = state.doc.objects[id];
     if (!obj) {
-      this.close(false);
+      // No backing object? Just remove the editor
+      editorDiv.remove();
       return;
     }
 
-    const text = (state.textEl.textContent || '').trim();
+    // Read and trim the textContent safely
+    const text = editorDiv.textContent ? editorDiv.textContent.trim() : '';
+
     if (text === '') {
-      // Remove empty text object
+      // Delete empty text object
       DocumentManager.deleteObject(id, true);
     } else {
-      // Update text object
-      DocumentManager.updateObject(id, { text, rev: obj.rev + 1 }, true);
+      // Update the text object
+      DocumentManager.updateObject(id, { text }, true);
     }
 
-    this.close(false);
+    // Remove editor from DOM
+    editorDiv.remove();
   }
+
+
 
   static close(shouldCommit = false) {
     if (!state.textEl) return;
@@ -1665,7 +1682,7 @@ class CursorManager {
       ui.mouse.style.left = `${event.clientX + 20}px`;
       ui.mouse.style.top = `${event.clientY + 20}px`;
       ui.mouse.style.transform = "translate(-50%, -50%)";
-      ui.mouse.textContent = state.peerName || 'You';
+      ui.mouse.textContent = 'You';
     }
 
     // Throttle network broadcasts
@@ -2127,11 +2144,6 @@ class UIManager {
     const success = await room.addRoomState(state.topicKey);
     if (success) {
       alert('Drawing state saved to Hyperbee 🐝');
-      // Show visual feedback
-      ui.saveState.textContent = 'Savinggg';
-      setTimeout(() => {
-        ui.saveState.textContent = 'Save State';
-      }, 2000);
     } else {
       alert('Failed to save drawing state');
     }
@@ -2660,6 +2672,120 @@ if (!window.__WB_EVENTS_BOUND__) {
     await displayStates(states)
   })
 
+  ui.slideIconBtn.addEventListener('click', async () => {
+    console.log('Clickeddd')
+    await displayIcons()
+  })
+
+  async function displayIcons() {
+    document.addEventListener('click', (event) => {
+      if (ui.slideIconContainer && !ui.slideIconContainer.classList.contains('hidden')) {
+        if (!ui.slideIconContainer.contains(event.target) && !ui.slideIconBtn.contains(event.target)) {
+          ui.slideIconContainer.classList.add('hidden');
+        }
+      }
+    });
+
+    ui.slideIconContainer.addEventListener('click', (event) => {
+      event.stopPropagation();
+    });
+    ui.slideIconContainer.classList.remove('hidden');
+
+    if (!states || states.length === 0) {
+      const emptyContainer = document.createElement('div');
+      emptyContainer.className = 'empty-states';
+      emptyContainer.innerHTML = `
+            <div class="states-container-header">
+                <h3>Icons</h3>
+                <button class="slide-state-close">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <p class="no-states-message">No icons available</p>
+        `;
+
+      const closeButton = emptyContainer.querySelector('.slide-state-close');
+      closeButton.addEventListener('click', () => {
+        ui.slideIconContainer.classList.add('hidden');
+      });
+
+      ui.slideIconContainer.innerHTML = '';
+      ui.slideIconContainer.appendChild(emptyContainer);
+      return;
+    }
+
+    // Create container header with close button
+    const containerHeader = document.createElement('div');
+    containerHeader.className = 'states-container-header';
+    containerHeader.innerHTML = `
+        <h3>States</h3>
+        <button class="slide-state-close">
+            <i class="fas fa-times"></i>
+        </button>
+    `;
+
+    // Add click handler to close button
+    const closeButton = containerHeader.querySelector('.slide-state-close');
+    closeButton.addEventListener('click', () => {
+      ui.slideIconContainer.classList.add('hidden');
+    });
+
+    // Create states list
+    const statesList = document.createElement('ul');
+    statesList.className = 'states-list';
+
+    // Add states to the list
+    states.forEach((state, index) => {
+      const stateItem = document.createElement('li');
+      stateItem.className = 'state-item';
+
+      // Format timestamp
+      const timestamp = new Date(state.savedAt).toLocaleString();
+      const objectCount = state.order?.length || 0;
+
+      stateItem.innerHTML = `
+            <div class="state-info" data-index="${index}">
+                <img class="state-thumbnail" src="${state.thumbnail}" alt="State preview">
+                <div class="state-details">
+                    <h5 class="state-index" style="background: #ffffff;padding: 4px;border-radius: 4px;">State ${index + 1}</h5>
+                    <div style="display: flex; flex-direction: row; width: 100%; justify-content: space-between; flex-wrap: wrap;">
+                    <p class="state-timestamp">${new Date(state.savedAt).toLocaleString()}</p>
+                    <p class="object-count hidden">${state.order?.length || 0} objects</p>
+                    <p class="saved-by">by ${state.savedBy}</p>
+                    </div>
+                    <i class="fas fa-trash delete-state" title="Delete room"></i>
+                </div>
+            </div>
+        `;
+
+      const deleteButton = stateItem.querySelector('.delete-state');
+      deleteButton.addEventListener('click', async (e) => {
+        e.preventDefault();
+        e.stopPropagation()
+        const updatedStates = await room.deleteState(state.roomKey, index);
+        console.log('Updated states:', updatedStates)
+        await displayStates(updatedStates)
+        alert('State deleted successfully!');
+      })
+
+      stateItem.addEventListener('click', () => {
+        Room.applyDrawingState(state);
+      });
+
+      statesList.appendChild(stateItem);
+    });
+
+    // Create wrapper for scrollable content
+    const contentWrapper = document.createElement('div');
+    contentWrapper.className = 'states-content-wrapper';
+    contentWrapper.appendChild(statesList);
+
+    // Clear container and add new elements
+    ui.slideIconContainer.innerHTML = '';
+    ui.slideIconContainer.appendChild(containerHeader);
+    ui.slideIconContainer.appendChild(contentWrapper);
+  }
+
   async function displayStates(states) {
     const container = document.getElementById('slide-state-container');
     const slideStateBtn = document.querySelector('.slide-state-btn');
@@ -2772,19 +2898,18 @@ if (!window.__WB_EVENTS_BOUND__) {
     container.appendChild(contentWrapper);
   }
 // Enhanced room management
-  document.getElementById('delete-state').addEventListener('click', async () => {
+  document.getElementById('delete-all-state').addEventListener('click', async () => {
     const roomKey = document.getElementById('canvas-topic').getAttribute('data-value');
     if (!roomKey) {
       alert('No active room to delete');
       return;
     }
 
-    const confirmDelete = confirm(`Are you sure you want to delete all drawings in room "${roomKey}"?`);
+    const confirmDelete = confirm(`Are you sure you want to delete all your states in this room?`);
     if (confirmDelete) {
-      const success = await room.deleteDrawings(roomKey);
+      const success = await room.deleteAllStates(roomKey);
       if (success) {
         alert('Room drawings deleted successfully');
-        location.reload(); // Refresh the room list
       } else {
         alert('Failed to delete room drawings');
       }

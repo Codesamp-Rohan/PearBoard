@@ -60,14 +60,15 @@
     <button class="btn" data-tool="rect" title="Rectangle (R)"><img class="icon" src="assets/icons/rect.png" alt="icon" /></button>
     <button class="btn" data-tool="ellipse" title="Ellipse (O)"><img class="icon" src="assets/icons/ellipse.png" alt="icon" /></button>
     <button class="btn" data-tool="diamond" title="Diamond (D)"><img class="icon" src="assets/icons/diamond.png" alt="icon" /></button>
+    <div class="divider"></div>
     <button class="btn" data-tool="text" title="Text (T)"><img class="icon" src="assets/icons/text.png" alt="icon" /></button>
     <button class="btn" data-tool="hand" title="Hand (H)"><img class="icon" src="assets/icons/hand.png" alt="icon" /></button>
+    <div class="divider"></div>
     <button id="undo" class="btn" title="Undo (Ctrl/Cmd+Z)"><img class="icon" src="assets/icons/undo.png" alt="icon" /></button>
     <button id="redo" class="btn" title="Redo (Ctrl/Cmd+Shift+Z)"><img class="icon" src="assets/icons/redo.png" alt="icon" /></button>
+    <div class="divider"></div>
+    <button id="slide-icon-btn" class="btn" title="Icons"><img src="./assets/icons/gallery.png" class="icon" alt="clean-icon"></button>
     <button id="clear" class="btn" title="Clear"><img src="./assets/icons/clean.png" class="icon" alt="clean-icon"></button>
-    <button id="save" class="btn" title="Save PNG"><img class="icon" src="assets/icons/download.png" alt="icon" /></button>
-    <button id="save-state" class="btn" title="Save State">Save State</button>
-    <button id="delete-state" class="btn" title="Delete State">❌</button>
   </div>
   </div>
   <div class="drawing-controls">
@@ -112,7 +113,7 @@
   <!--Floaters-->
   <div class="right-top-data">
     <button type="button" id="toggleRightPanel" class="controls-toggle" aria-label="Toggle right panel" aria-expanded="false">
-      <h5>Canvas Info</h5>
+      <h5>States Edit</h5>
       <img class="icon" src="assets/icons/setting.png" alt="Options" />
     </button>
 
@@ -136,7 +137,7 @@
           </div>
         </button>
 
-        <div class="divider"></div>
+        <div class="divider-menu"></div>
 
         <button class="canvas-room-key hidden" type="button">
           <img class="icon" src="./assets/icons/copy.png" alt="copy-img">
@@ -154,7 +155,35 @@
           </div>
         </button>
 
-        <div class="divider"></div>
+        <div class="divider-menu"></div>
+
+        <button class="slide-state-btn" id="save" type="button">
+          <img class="icon" src="./assets/icons/download.png" alt="download-img">
+          <div class="text-container">
+            <h5>Save as Image</h5>
+            <p>Save the canvas as image with transparent background.</p>
+          </div>
+        </button>
+
+        <button class="slide-state-btn" id="save-state" type="button">
+          <img class="icon" src="./assets/icons/save.png" alt="save-state-img">
+          <div class="text-container">
+            <h5>Save the State</h5>
+            <p>Save the current canvas state.</p>
+          </div>
+        </button>
+
+        <button class="slide-state-btn" id="delete-all-state" type="button">
+          <img class="icon" src="./assets/icons/delete.png" alt="save-state-img">
+          <div class="text-container">
+          <h5>Delete all States</h5>
+          <p>Delete all the states from canvas.</p>
+        </div>
+        </button>
+
+
+
+        <div class="divider-menu"></div>
 
         <div class="name-container">
           <button class="button peer-name-container" type="button">
@@ -174,8 +203,11 @@
   <div id="slide-state-container" class="hidden">
     <button id="slide-state-close-btn">Close</button>
   </div>
-  <div id="zoom-scale-display" style="">
-    <button class="zoom_min">-</button>100%<button class="zoom_max">+</button>
+  <div id="slide-icon-container" class="hidden">
+    <button id="slide-icon-close-btn">Close</button>
+  </div>
+  <div id="zoom-scale-display-container" style="">
+    <button class="zoom_min">-</button><p id="zoom-scale-display">100%</p><button class="zoom_max">+</button>
   </div>
   <canvas id="board" aria-label="Drawing canvas"></canvas>
   <p id="mouse-follower">You</p>
