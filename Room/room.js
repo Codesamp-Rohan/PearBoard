@@ -148,6 +148,38 @@ export class Room {
         }
     }
 
+
+    async deleteAllStates(roomKey) {
+        try {
+            await this.ensureStorage();
+            const room = await this.getRoom(roomKey);
+
+            if(!this.hasDrawings(roomKey)) {
+                alert('No drawings found.')
+                return
+            }
+
+            const updatedStates = []
+            const updatedRoom = {
+                ...room,
+                states: updatedStates,
+                lastModified: Date.now()
+            };
+
+            await roomDB.put(roomKey, updatedRoom);
+            console.log(`All states deleted from room:`, roomKey);
+            NetworkManager.broadcast({
+                t: 'all_states_deleted',
+                from: state.localPeerId,
+                roomKey,
+            });
+            return updatedStates;
+        } catch (error) {
+            console.error('Error deleting states:', error);
+            return false;
+        }
+    }
+
     async getRoomState(roomKey) {
         await this.ensureStorage();
         const room = await this.getRoom(roomKey);
@@ -303,10 +335,6 @@ export class Room {
             console.error(e)
             return false;
         }
-    }
-
-    async deleteDrawings(roomKey) {
-        return null
     }
 
     async getAllRooms() {

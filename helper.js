@@ -1,3 +1,6 @@
+import fs from 'fs';
+import path from 'path';
+
 export function addAlphaToColor(hex, alpha) {
     if (!hex.startsWith('#')) return hex;
     const v = hex.slice(1);
@@ -31,9 +34,52 @@ document.querySelector('.slide-state-btn').addEventListener('click', () => {
     document.querySelector('#slide-state-container').classList.toggle('hidden');
 })
 
-document.querySelector('#slide-state-close-btn').addEventListener('click', () => {
-    document.querySelector('#state-details-container').classList.toggle('hidden');
-})
+// document.querySelector('#slide-state-close-btn').addEventListener('click', () => {
+//     document.querySelector('#state-details-container').classList.toggle('hidden');
+// })
+
+export default function loadIcons() {
+    const imgDir = './assets/board_icons';
+    const iconContainer = document.querySelector('#slide-icon-container');
+
+    if (!iconContainer) {
+        console.error('Icon container not found');
+        return [];
+    }
+
+    fs.readdir(imgDir, (err, files) => {
+        if (err) {
+            console.error('Unable to scan directory:', err);
+            return;
+        }
+
+        const imageFiles = files.filter(file => {
+            const ext = path.extname(file).toLowerCase();
+            return ['.jpg', '.jpeg', '.png', '.gif'].includes(ext);
+        });
+
+        imageFiles.forEach(image => {
+            const img = document.createElement('img');
+            img.src = `${imgDir}/${image}`;
+            img.alt = image;
+            img.title = image;
+            img.className = 'icon-item'; // Add a class for styling
+            img.style.cursor = 'pointer';
+
+            img.addEventListener('click', () => {
+                console.log(`Selected icon: ${image}`);
+            });
+
+            iconContainer.appendChild(img);
+        });
+
+        console.log(`Loaded ${imageFiles.length} icons`);
+        return imageFiles;
+    });
+}
+
+
+////////////////////////////////////////////////////////////////////
 
 class DrawingControls {
     constructor() {

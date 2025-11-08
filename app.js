@@ -1,7 +1,7 @@
 import Hyperswarm from 'hyperswarm';
 import b4a from 'b4a';
 import crypto from 'hypercore-crypto';
-import { addAlphaToColor, getRandomColorPair } from "./helper.js";
+import loadIcons, { addAlphaToColor, getRandomColorPair } from "./helper.js";
 import {Room, room} from "./Room/room.js";
 
 import {globalState} from "./storage/GlobalState.js";
@@ -57,6 +57,10 @@ export const ui = {
   slideStateContainer: $('#slide-state-container'),
   slideStateBtn: $('.slide-state-btn'),
   slideStateCloseBtn: $('#slide-state-close-btn'),
+
+  slideIconBtn: $('#slide-icon-btn'),
+  slideIconContainer: $('#slide-icon-container'),
+  slideIconCloseBtn: $('#slide-icon-close-btn'),
 
   // Tools
   tools: $('#tools'),
@@ -119,6 +123,232 @@ export class CanvasManager {
     this.setupEventListeners();
     this.startRenderLoop();
     this.renderFrame();
+
+    // Add state for tracking touches and space key
+    state.isDragging = false;
+    state.isSpacePressed = false;
+    state.lastTouchX = 0;
+    state.lastTouchY = 0;
+  }
+
+  static setupEventListeners() {
+    window.addEventListener('resize', () => {
+      this.resizeCanvas();
+      if (typeof CursorManager !== 'undefined') {
+        CursorManager.handleWindowResize();
+      }
+    });
+
+    ui.canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (e.ctrlKey) {
+        const zoomFactor = e.deltaY < 0 ? CONFIG.ZOOM_STEP : 1 / CONFIG.ZOOM_STEP;
+        const newZoom = Math.min(
+            CONFIG.MAX_ZOOM,
+            Math.max(CONFIG.MIN_ZOOM, state.zoom * zoomFactor)
+        );
+
+        if (newZoom === state.zoom) return;
+
+        const rect = ui.canvas.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        const worldX = (mouseX - state.panX) / state.zoom;
+        const worldY = (mouseY - state.panY) / state.zoom;
+
+        state.zoom = newZoom;
+
+        state.panX = mouseX - (worldX * newZoom);
+        state.panY = mouseY - (worldY * newZoom);
+
+        const scalePercent = Math.round(newZoom * 100);
+        ui.scaleDisplay.textContent = `${scalePercent}%`;
+
+        this.clampPan();
+        state.requestRender();
+
+        if (typeof CursorManager !== 'undefined') {
+          CursorManager.handleCanvasTransform();
+        }
+      } else {
+        state.panX -= e.deltaX;
+        state.panY -= e.deltaY;
+
+        this.clampPan();
+        state.requestRender();
+
+        if (typeof CursorManager !== 'undefined') {
+          CursorManager.handleCanvasTransform();
+        }
+      }
+    }, { passive: false });
+
+
+    // Add these variables at the class level (keep as-is)
+    let lastPinchDistance = 0;
+    let initialPinchDistance = 0;  // Add this
+    let pinchStartZoom = 0;
+    let pinchCenter = { x: 0, y: 0 };
+
+// CORRECTED touchstart handler
+    ui.canvas.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const touch1 = e.touches[0];
+        const touch2 = e.touches[1];
+
+        // Calculate initial pinch distance
+        initialPinchDistance = Math.hypot(
+            touch2.clientX - touch1.clientX,
+            touch2.clientY - touch1.clientY
+        );
+        lastPinchDistance = initialPinchDistance;
+
+        // Store initial zoom level
+        pinchStartZoom = state.zoom;
+
+        // Calculate and STORE the initial pinch center point
+        const rect = ui.canvas.getBoundingClientRect();
+        pinchCenter = {
+          x: (touch1.clientX + touch2.clientX) / 2,
+          y: (touch1.clientY + touch2.clientY) / 2
+        };
+
+        // Convert initial pinch center to world coordinates
+        pinchCenter.worldX = (pinchCenter.x - rect.left - state.panX) / state.zoom;
+        pinchCenter.worldY = (pinchCenter.y - rect.top - state.panY) / state.zoom;
+      }
+    });
+
+// CORRECTED touchmove handler
+    ui.canvas.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const touch1 = e.touches[0];
+        const touch2 = e.touches[1];
+
+        // Calculate current pinch distance
+        const currentPinchDistance = Math.hypot(
+            touch2.clientX - touch1.clientX,
+            touch2.clientY - touch1.clientY
+        );
+
+        // Calculate zoom based on initial distance (not last distance)
+        const scale = currentPinchDistance / initialPinchDistance;
+        const newZoom = Math.min(
+            CONFIG.MAX_ZOOM,
+            Math.max(CONFIG.MIN_ZOOM, pinchStartZoom * scale)
+        );
+
+        if (newZoom !== state.zoom) {
+          // Get current pinch center
+          const currentPinchCenter = {
+            x: (touch1.clientX + touch2.clientX) / 2,
+            y: (touch1.clientY + touch2.clientY) / 2
+          };
+
+          const rect = ui.canvas.getBoundingClientRect();
+
+          // Apply new zoom
+          state.zoom = newZoom;
+
+          // Update pan to keep the world point under the pinch center fixed
+          state.panX = currentPinchCenter.x - rect.left - (pinchCenter.worldX * newZoom);
+          state.panY = currentPinchCenter.y - rect.top - (pinchCenter.worldY * newZoom);
+
+          // Update zoom display
+          ui.scaleDisplay.textContent = `${Math.round(newZoom * 100)}%`;
+
+          // Update canvas and bounds
+          CanvasManager.clampPan();
+          state.requestRender();
+          if (typeof CursorManager !== 'undefined') {
+            CursorManager.handleCanvasTransform();
+          }
+        }
+      }
+    });
+
+// touchend and touchcancel remain the same
+    ui.canvas.addEventListener('touchend', (e) => {
+      if (e.touches.length < 2) {
+        lastPinchDistance = 0;
+        initialPinchDistance = 0;  // Also reset this
+        pinchStartZoom = 0;
+      }
+    });
+
+    ui.canvas.addEventListener('touchcancel', () => {
+      lastPinchDistance = 0;
+      initialPinchDistance = 0;  // Also reset this
+      pinchStartZoom = 0;
+    });
+
+    // Add space + mouse drag handlers
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && !state.isSpacePressed) {
+        state.isSpacePressed = true;
+        ui.canvas.style.cursor = 'grab';
+      }
+    });
+
+    document.addEventListener('keyup', (e) => {
+      if (e.code === 'Space') {
+        state.isSpacePressed = false;
+        ui.canvas.style.cursor = 'default';
+      }
+    });
+
+    ui.canvas.addEventListener('mousedown', (e) => {
+      if (state.isSpacePressed) {
+        e.preventDefault();
+        state.isDragging = true;
+        state.lastTouchX = e.clientX;
+        state.lastTouchY = e.clientY;
+        ui.canvas.style.cursor = 'grabbing';
+      }
+    });
+
+    ui.canvas.addEventListener('mousemove', (e) => {
+      if (state.isDragging && state.isSpacePressed) {
+        e.preventDefault();
+        const dx = e.clientX - state.lastTouchX;
+        const dy = e.clientY - state.lastTouchY;
+
+        state.panX += dx;
+        state.panY += dy;
+
+        state.lastTouchX = e.clientX;
+        state.lastTouchY = e.clientY;
+
+        this.clampPan();
+        state.requestRender();
+      }
+    });
+
+    ui.canvas.addEventListener('mouseup', () => {
+      if (state.isSpacePressed) {
+        state.isDragging = false;
+        ui.canvas.style.cursor = 'grab';
+      }
+    });
+
+    // Prevent space from scrolling the page
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+      }
+    });
+
+    // Existing zoom button listeners...
+    ui.zoomMax.addEventListener('click', () => {
+      this.handleZoomButton(CONFIG.ZOOM_STEP);
+    });
+
+    ui.zoomMin.addEventListener('click', () => {
+      this.handleZoomButton(1 / CONFIG.ZOOM_STEP);
+    });
   }
 
   static generateThumbnail(canvas, maxWidth = 300, maxHeight = 150) {
@@ -173,28 +403,6 @@ export class CanvasManager {
     const startTopWorld = (CONFIG.WORLD_HEIGHT - viewHeight / state.zoom) / 2;
     state.panX = -startLeftWorld * state.zoom;
     state.panY = -startTopWorld * state.zoom;
-  }
-
-  static setupEventListeners() {
-    window.addEventListener('resize', () => {
-      this.resizeCanvas();
-      if (typeof CursorManager !== 'undefined') {
-        CursorManager.handleWindowResize();
-      }
-    });
-
-    ui.canvas.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      this.handleWheel(e);
-    }, { passive: false });
-
-    ui.zoomMax.addEventListener('click', () => {
-      this.handleZoomButton(CONFIG.ZOOM_STEP);
-    });
-
-    ui.zoomMin.addEventListener('click', () => {
-      this.handleZoomButton(1 / CONFIG.ZOOM_STEP);
-    });
   }
 
   static handleZoomButton(zoomFactor) {
@@ -308,6 +516,7 @@ export class CanvasManager {
 // GRID RENDERING
 // ============================================================================
 
+
 class GridRenderer {
   static render(ctx, scale, translateX, translateY) {
     const viewWidth = ui.canvas.clientWidth;
@@ -329,23 +538,19 @@ class GridRenderer {
     const minorPixels = minorStep * state.zoom;
     const showMinor = minorPixels >= CONFIG.MIN_MINOR_PX;
 
-    // Switch to screen space for crisp lines
+    // Switch to screen space for crisp dots
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.lineWidth = 1;
 
-    // Render minor grid
+    // Render minor grid dots
     if (showMinor) {
-      this.renderGridLines(ctx, minorStep, leftWorld, topWorld, rightWorld, bottomWorld,
-          scale, translateX, translateY, 'rgba(0,0,0,0.05)');
+      this.renderGridDots(ctx, minorStep, leftWorld, topWorld, rightWorld, bottomWorld,
+          scale, translateX, translateY, 'rgba(0,0,0,0.15)', 1);
     }
 
-    // Render major grid
-    this.renderGridLines(ctx, majorStep, leftWorld, topWorld, rightWorld, bottomWorld,
-        scale, translateX, translateY, 'rgba(0,0,0,0.12)');
-
-    // Render axes
-    this.renderAxes(ctx, scale, translateX, translateY);
+    // Render major grid dots
+    this.renderGridDots(ctx, majorStep, leftWorld, topWorld, rightWorld, bottomWorld,
+        scale, translateX, translateY, 'rgba(0,0,0,0.45)', 3);
 
     ctx.restore();
 
@@ -353,52 +558,22 @@ class GridRenderer {
     ctx.setTransform(scale, 0, 0, scale, translateX, translateY);
   }
 
-  static renderGridLines(ctx, step, leftWorld, topWorld, rightWorld, bottomWorld,
-                         scale, translateX, translateY, color) {
-    ctx.strokeStyle = color;
+  static renderGridDots(ctx, step, leftWorld, topWorld, rightWorld, bottomWorld,
+                        scale, translateX, translateY, color, dotSize) {
+    ctx.fillStyle = color;
 
     const startX = Math.floor(leftWorld / step) * step;
     const startY = Math.floor(topWorld / step) * step;
 
-    // Vertical lines
     for (let x = startX; x <= rightWorld; x += step) {
-      const screenX = Math.round(scale * x + translateX) + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(screenX, 0);
-      ctx.lineTo(screenX, ui.canvas.height);
-      ctx.stroke();
-    }
+      for (let y = startY; y <= bottomWorld; y += step) {
+        const screenX = Math.round(scale * x + translateX);
+        const screenY = Math.round(scale * y + translateY);
 
-    // Horizontal lines
-    for (let y = startY; y <= bottomWorld; y += step) {
-      const screenY = Math.round(scale * y + translateY) + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(0, screenY);
-      ctx.lineTo(ui.canvas.width, screenY);
-      ctx.stroke();
-    }
-  }
-
-  static renderAxes(ctx, scale, translateX, translateY) {
-    const screenX0 = Math.round(scale * 0 + translateX) + 0.5;
-    const screenY0 = Math.round(scale * 0 + translateY) + 0.5;
-
-    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
-
-    // Y-axis
-    if (screenX0 >= 0 && screenX0 <= ui.canvas.width) {
-      ctx.beginPath();
-      ctx.moveTo(screenX0, 0);
-      ctx.lineTo(screenX0, ui.canvas.height);
-      ctx.stroke();
-    }
-
-    // X-axis
-    if (screenY0 >= 0 && screenY0 <= ui.canvas.height) {
-      ctx.beginPath();
-      ctx.moveTo(0, screenY0);
-      ctx.lineTo(ui.canvas.width, screenY0);
-      ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(screenX, screenY, dotSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 
@@ -414,7 +589,6 @@ class GridRenderer {
     return 10 * base;
   }
 }
-
 // ============================================================================
 // OBJECT RENDERING
 // ============================================================================
@@ -898,7 +1072,7 @@ class TextEditor {
   }
 
   static createEditorElement(x, y, textObj, fontPixels, initialText) {
-    const div = document.createElement('div');
+    const div = document.createElement('textarea');
     div.className = 'text-editor';
     div.contentEditable = 'true';
     div.dataset.id = textObj.id;
@@ -919,10 +1093,11 @@ class TextEditor {
       outline: 'none',
       boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
       zIndex: '9999',
-      whiteSpace: 'nowrap',
+      whiteSpace: 'pre-wrap',
       overflow: 'visible',
       minWidth: '20px',
       minHeight: '16px',
+      maxWidth: '400px',
       transformOrigin: 'top left',
       transform: state.zoom !== 1 ? `scale(${state.zoom})` : 'none'
     });
@@ -958,26 +1133,38 @@ class TextEditor {
   }
 
   static commit() {
-    if (!state.textEl) return;
+    // Capture and clear the editor element from state immediately
+    const editorDiv = state.textEl;
+    state.textEl = null;
+    state.activeId = null;
 
-    const id = state.textEl.dataset.id;
+    // If there's no active editor, nothing to do
+    if (!editorDiv) return;
+
+    const id = editorDiv.dataset.id;
     const obj = state.doc.objects[id];
     if (!obj) {
-      this.close(false);
+      // No backing object? Just remove the editor
+      editorDiv.remove();
       return;
     }
 
-    const text = (state.textEl.textContent || '').trim();
+    // Read and trim the textContent safely
+    const text = editorDiv.textContent ? editorDiv.textContent.trim() : '';
+
     if (text === '') {
-      // Remove empty text object
+      // Delete empty text object
       DocumentManager.deleteObject(id, true);
     } else {
-      // Update text object
-      DocumentManager.updateObject(id, { text, rev: obj.rev + 1 }, true);
+      // Update the text object
+      DocumentManager.updateObject(id, { text }, true);
     }
 
-    this.close(false);
+    // Remove editor from DOM
+    editorDiv.remove();
   }
+
+
 
   static close(shouldCommit = false) {
     if (!state.textEl) return;
@@ -1495,7 +1682,7 @@ class CursorManager {
       ui.mouse.style.left = `${event.clientX + 20}px`;
       ui.mouse.style.top = `${event.clientY + 20}px`;
       ui.mouse.style.transform = "translate(-50%, -50%)";
-      ui.mouse.textContent = state.peerName || 'You';
+      ui.mouse.textContent = 'You';
     }
 
     // Throttle network broadcasts
@@ -1957,11 +2144,6 @@ class UIManager {
     const success = await room.addRoomState(state.topicKey);
     if (success) {
       alert('Drawing state saved to Hyperbee 🐝');
-      // Show visual feedback
-      ui.saveState.textContent = 'Savinggg';
-      setTimeout(() => {
-        ui.saveState.textContent = 'Save State';
-      }, 2000);
     } else {
       alert('Failed to save drawing state');
     }
@@ -2004,6 +2186,7 @@ class SessionManager {
 
     UIManager.showLoading();
     ui.topicOut.dataset.value = topicHex;
+    ui.topicOut.textContent = topicHex
 
     try {
       await NetworkManager.initSwarm(topicHex);
@@ -2425,10 +2608,10 @@ function renderRoomList(rooms) {
   const html = rooms
       .map((room) => `
       <li class="room-list" data-value="${room.key}" data-name="${room.value.roomName}">
-        <div class="room-name">${room.value.roomName}</div>
-        <div class="room-date">
+        <h5 class="room-name">${room.value.roomName}</h5>
+        <p class="room-date">
           Created: ${new Date(room.value.createdAt).toLocaleString()}
-        </div>
+        </p>
         <i class="fas fa-trash delete-icon" title="Delete room"></i>
       </li>
     `)
@@ -2488,6 +2671,112 @@ if (!window.__WB_EVENTS_BOUND__) {
     const states = await room.loadAllStates(state.topicKey)
     await displayStates(states)
   })
+
+  async function displayIcons() {
+    const imageFiles = await loadIcons();
+
+    if (!ui.slideIconContainer.classList.contains('hidden')) {
+      ui.slideIconContainer.classList.add('hidden');
+      return;
+    }
+
+    ui.slideIconContainer.classList.remove('hidden');
+
+    if (imageFiles.length === 0) {
+      const emptyContainer = document.createElement('div');
+      emptyContainer.className = 'empty-icons';
+      emptyContainer.innerHTML = `
+      <div class="icons-container-header">
+        <h3>Icons</h3>
+        <button class="slide-icon-close">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div class="no-icons-message">
+        <p>No icons available</p>
+      </div>
+    `;
+
+      const closeButton = emptyContainer.querySelector('.slide-icon-close');
+      closeButton.addEventListener('click', () => {
+        ui.slideIconContainer.classList.add('hidden');
+      });
+      return;
+    }
+    const containerHeader = document.createElement('div');
+    containerHeader.className = 'icons-container-header';
+    containerHeader.innerHTML = `
+       <div class="icons-container-header">
+        <h3>Icons</h3>
+        <button class="slide-icon-close">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+         `;
+
+    const iconsList = document.createElement('ul');
+    iconsList.className = 'icons-list';
+
+    imageFiles.forEach((iconFile, index) => {
+      const iconItem = document.createElement('li');
+      iconItem.className = 'icon-item';
+      iconItem.dataset.index = index;
+
+      const iconPath = `./assets/board_icons/${iconFile}`;
+
+      iconItem.innerHTML = `
+      <div class="icon-info" data-index="${index}">
+        <img class="icon-thumbnail" src="${iconPath}" alt="Icon preview">
+        <div class="icon-details">
+          <h5 class="icon-name">${iconFile}</h5>
+          <p class="icon-type">Icon</p>
+        </div>
+      </div>
+    `;
+
+      // Add click handler to select icon
+      iconItem.addEventListener('click', () => {
+        const img = new Image();
+        img.onload = () => {
+          const iconObj = {
+            id: state.generateRandomId(),
+            type: 'image',
+            x: 100,
+            y: 100,
+            w: img.width,
+            h: img.height,
+            src: iconPath,
+            createdBy: state.localPeerId,
+            rev: 0
+          };
+          DocumentManager.addObject(iconObj, true);
+        };
+        img.src = iconPath;
+      });
+
+      iconsList.appendChild(iconItem);
+    });
+
+    // Create wrapper for scrollable content
+    const contentWrapper = document.createElement('div');
+    contentWrapper.className = 'icons-content-wrapper';
+    contentWrapper.appendChild(iconsList);
+
+    // Clear and populate container
+    ui.slideIconContainer.appendChild(containerHeader);
+    ui.slideIconContainer.appendChild(contentWrapper);
+  }
+
+  ui.slideIconBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    console.log('Icon button clicked');
+    await displayIcons();
+  });
+
+  ui.slideIconCloseBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    ui.slideIconContainer.classList.add('hidden');
+  });
 
   async function displayStates(states) {
     const container = document.getElementById('slide-state-container');
@@ -2562,12 +2851,14 @@ if (!window.__WB_EVENTS_BOUND__) {
             <div class="state-info" data-index="${index}">
                 <img class="state-thumbnail" src="${state.thumbnail}" alt="State preview">
                 <div class="state-details">
-                    <div class="state-index">State ${index + 1}</div>
-                    <div class="state-timestamp">${new Date(state.savedAt).toLocaleString()}</div>
-                    <div class="object-count">${state.order?.length || 0} objects</div>
-                    <div class="saved-by">by ${state.savedBy}</div>
+                    <h5 class="state-index" style="background: #ffffff;padding: 4px;border-radius: 4px;">State ${index + 1}</h5>
+                    <div style="display: flex; flex-direction: row; width: 100%; justify-content: space-between; flex-wrap: wrap;">
+                    <p class="state-timestamp">${new Date(state.savedAt).toLocaleString()}</p>
+                    <p class="object-count hidden">${state.order?.length || 0} objects</p>
+                    <p class="saved-by">by ${state.savedBy}</p>
+                    </div>
+                    <i class="fas fa-trash delete-state" title="Delete room"></i>
                 </div>
-                <i class="fas fa-trash delete-state" title="Delete room"></i>
             </div>
         `;
 
@@ -2599,19 +2890,18 @@ if (!window.__WB_EVENTS_BOUND__) {
     container.appendChild(contentWrapper);
   }
 // Enhanced room management
-  document.getElementById('delete-state').addEventListener('click', async () => {
+  document.getElementById('delete-all-state').addEventListener('click', async () => {
     const roomKey = document.getElementById('canvas-topic').getAttribute('data-value');
     if (!roomKey) {
       alert('No active room to delete');
       return;
     }
 
-    const confirmDelete = confirm(`Are you sure you want to delete all drawings in room "${roomKey}"?`);
+    const confirmDelete = confirm(`Are you sure you want to delete all your states in this room?`);
     if (confirmDelete) {
-      const success = await room.deleteDrawings(roomKey);
+      const success = await room.deleteAllStates(roomKey);
       if (success) {
         alert('Room drawings deleted successfully');
-        location.reload(); // Refresh the room list
       } else {
         alert('Failed to delete room drawings');
       }
@@ -2641,6 +2931,26 @@ if (!window.__WB_EVENTS_BOUND__) {
   document.querySelector('#state-details').addEventListener('click', () => {
     console.log(state)
   })
+
+  // Add this to your initialization code
+  document.addEventListener('DOMContentLoaded', () => {
+    const toggleRightPanel = document.getElementById('toggleRightPanel');
+    const rightPanelContainer = document.getElementById('rightPanelContainer');
+
+    toggleRightPanel.addEventListener('click', () => {
+      const isExpanded = toggleRightPanel.getAttribute('aria-expanded') === 'true';
+      toggleRightPanel.setAttribute('aria-expanded', !isExpanded);
+      rightPanelContainer.classList.toggle('hidden');
+    });
+
+    // Close panel when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.right-top-data')) {
+        toggleRightPanel.setAttribute('aria-expanded', 'false');
+        rightPanelContainer.classList.add('hidden');
+      }
+    });
+  });
 
 // Export for potential external use
   if (typeof module !== 'undefined' && module.exports) {
